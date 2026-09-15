@@ -138,8 +138,10 @@ With the virtual environment active and courses configured, run the checker from
 python src/checker.py
 ```
 
-The checker retrieves the configured sections immediately, prints the results,
-saves successful state, and repeats after a wait of 600 seconds (10 minutes) by default.
+The checker retrieves the configured sections immediately and saves successful
+state. Each cycle prints one summary with its start time, error count or success
+status, and estimated next run time, followed by detailed course results.
+It repeats after a wait of 600 seconds (10 minutes) by default.
 Set `CHECK_INTERVAL` to a positive integer number of seconds to change the wait.
 Press `Ctrl+C` to stop.
 

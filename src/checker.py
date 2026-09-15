@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -54,23 +54,22 @@ def save_state(state):
 
 
 def check_once():
-    """Check configured courses once and save successful results."""
+    """Check courses, save successful state, and collect console output."""
+    results = []
+    errors = 0
     try:
         with COURSES_FILE.open() as file:
             courses = json.load(file)
     except (OSError, json.JSONDecodeError) as error:
-        print(f"Could not load courses.json: {error}")
-        return
+        return [f"ERROR: Could not load courses.json: {error}"], 1
 
     if not courses:
-        print("No courses configured in courses.json.")
-        return
+        return ["No courses configured in courses.json."], 0
 
     try:
         state = load_state()
     except (OSError, ValueError) as error:
-        print(f"Could not load previous state: {error}")
-        return
+        return [f"ERROR: Could not load previous state: {error}"], len(courses)
 
     state_changed = False
 
@@ -83,35 +82,45 @@ def check_once():
         try:
             sections = get_sections(subject, TERM)
         except (requests.RequestException, ValueError) as error:
-            print(f"Could not retrieve {subject}: {error}")
+            errors += len(configured_courses)
+            for crn, label in configured_courses:
+                results.append(
+                    "=" * 40 + f"\n{label}, CRN: {crn}\n"
+                    f"ERROR: Could not retrieve {subject} course data: {error}\n"
+                )
             continue
 
         for crn, label in configured_courses:
+            heading = "=" * 40 + f"\n{label}, CRN: {crn}\n"
             try:
                 section = parse_section(sections, crn)
+                details = (
+                    f"Instructor: {section['instructor']}\n"
+                    f"Days: {section['days']}\n"
+                    f"Meeting Time: {section['meeting_time']}\n"
+                    f"Location: {section['location']}\n"
+                    f"Delivery Mode: {section['delivery_mode']}\n"
+                    f"Credits: {section['credits']}\n"
+                    f"Current Enrollment: {section['current_enrollment']} / "
+                    f"{section['max_enrollment']}\n"
+                    f"Seats Remaining: {section['seats_remaining']}\n"
+                    f"STATUS: {section['status']}\n"
+                )
             except (ValueError, KeyError, TypeError) as error:
-                print(f"{label} (CRN {crn}): check failed — {error}")
+                errors += 1
+                results.append(heading + f"ERROR: Could not check course: {error}\n")
                 continue
 
             previous = state["courses"].get(crn, {})
-
-            print(f"CHECKED: {datetime.now():%Y-%m-%d %I:%M:%S %p}")
-            print("=" * 40)
-            print(f"{label} (CRN {crn})")
-            print(
-                f"Enrollment: {section['current_enrollment']}/"
-                f"{section['max_enrollment']}"
-            )
-            print(f"Available: {section['seats_remaining']}")
-            print(f"Status: {section['status'].title()}")
             if (
                 previous.get("status") == "CLOSED"
                 and section["status"] == "OPEN"
             ):
-                print("🚨 SEAT AVAILABLE!")
-            elif section["status"] == "CLOSED" or section["seats_remaining"] <= 0:
-                print("❌ No seats available.")
-            print()
+                details += (
+                    f"\n[NOTIFICATION]\n{label}, CRN: {crn} is now OPEN.\n"
+                    f"Seats Remaining: {section['seats_remaining']}\n"
+                )
+            results.append(heading + details)
 
             state["courses"][crn] = {
                 "status": section["status"],
@@ -123,7 +132,10 @@ def check_once():
         try:
             save_state(state)
         except OSError as error:
-            print(f"Could not save state: {error}")
+            errors += 1
+            results.append(f"ERROR: Could not save state: {error}")
+
+    return results, errors
 
 
 def main():
@@ -138,7 +150,22 @@ def main():
     print(f"Checking courses every {interval} seconds. Press Ctrl+C to stop.")
     try:
         while True:
-            check_once()
+            started = datetime.now()
+            results, errors = check_once()
+            next_run = datetime.now() + timedelta(seconds=interval)
+
+            print(f"Time: {started.strftime('%I:%M:%S %p').lstrip('0')}")
+            if errors:
+                print(
+                    f"Status: Scrape Completed with {errors} "
+                    f"{'Error' if errors == 1 else 'Errors'}"
+                )
+            else:
+                print("Status: Scrape Completed Successfully")
+            print(f"Next Run: {next_run.strftime('%I:%M:%S %p').lstrip('0')}")
+            print()
+            print("\n".join(results))
+            print()
             time.sleep(interval)
     except KeyboardInterrupt:
         print("\nCourse checker stopped.")

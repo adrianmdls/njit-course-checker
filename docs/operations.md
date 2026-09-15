@@ -14,6 +14,18 @@ failures preserve previous state and are retried on the next cycle. Successful
 results are saved in `data/state.json`, with console alerts for `CLOSED` to `OPEN`
 changes within the same term.
 
+Each cycle prints one summary before the course results: its start time,
+success or error count, and estimated next run time (completion time plus the
+configured interval). Successful checks show instructor, meeting details,
+delivery mode, credits, enrollment, seats remaining, and status.
+
+Each failed course counts as one error, including every affected course when
+a subject request fails. Failure details follow the summary; previous valid
+state is preserved. Configuration or state-file failures are also reported.
+Only a stored `CLOSED` status changing to `OPEN` prints `[NOTIFICATION]` with
+the course, CRN, and remaining seats. A first-time `OPEN` result sets a baseline.
+All output is console-only; file logging and Docker are not implemented.
+
 ## Retrieval Test
 
 The current application supports a local Banner retrieval test. Run these commands from the project root after completing the setup instructions in [setup.md](setup.md):
