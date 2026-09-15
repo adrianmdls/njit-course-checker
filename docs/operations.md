@@ -19,6 +19,23 @@ python -c 'from src.njit_scraper import get_sections; sections = get_sections("C
 
 Check that the response is a list and the preview contains CS courses. An empty list does not establish that the requested subject and term contain section data.
 
+## Checking One Section
+
+After installing the updated dependencies from `requirements.txt`, run from the project root with the virtual environment active:
+
+```bash
+python - <<'PY'
+from pprint import pprint
+from src.njit_scraper import get_sections, parse_section
+
+sections = get_sections("IT", "202690")
+section = parse_section(sections, "94243")
+pprint(section)
+PY
+```
+
+The result shows the matching section's meeting details, instructor, enrollment, seats remaining, and status. Change the subject, term, and CRN together to inspect another section. This development test prints only to the console and does not read course configuration or write state or logs.
+
 ## Planned Container Operation
 
 Scheduled checks, `CHECK_INTERVAL`, `courses.json` loading, persistent state and logging, notifications, and the `manual-check` command are not implemented yet. Container build, startup, restart, and maintenance commands will be added when those features are available.
