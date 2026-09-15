@@ -14,7 +14,6 @@ def get_sections(subject, term):
     encoded_subject = quote(encode(subject), safe="")
     encoded_term = quote(encode(term), safe="")
 
-    # Preserve the numeric prefixes from the verified Banner request.
     url = (
         "https://generalssb-prod.ec.njit.edu"
         "/BannerExtensibility/internalPb/virtualDomains.stuRegCrseSchedSections"
@@ -34,25 +33,38 @@ def get_sections(subject, term):
 def parse_section(sections, crn):
     """Extract one CRN's section details from the retrieved Banner tables."""
     crn = str(crn)
+
     for item in sections:
         soup = BeautifulSoup(item["SECTIONS_TABLE"], "html.parser")
+
         for row in soup.select("table.sections-table tr"):
-            cells = [cell.get_text(" ", strip=True)
-                     for cell in row.find_all("td", recursive=False)]
+            cells = [
+                cell.get_text(" ", strip=True)
+                for cell in row.find_all("td", recursive=False)
+            ]
+
             if len(cells) < 2 or cells[1] != crn:
                 continue
+
             if len(cells) != 13:
-                raise ValueError(f"Unexpected section columns for CRN {crn}")
+                raise ValueError(
+                    f"Unexpected section columns for CRN {crn}"
+                )
 
             status = cells[5].upper()
+
             if status not in ("OPEN", "CLOSED"):
-                raise ValueError(f"Unexpected status for CRN {crn}: {cells[5]}")
+                raise ValueError(
+                    f"Unexpected status for CRN {crn}: {cells[5]}"
+                )
 
             try:
                 max_enrollment = int(cells[6])
                 current_enrollment = int(cells[7])
             except ValueError as error:
-                raise ValueError(f"Invalid enrollment for CRN {crn}") from error
+                raise ValueError(
+                    f"Invalid enrollment for CRN {crn}"
+                ) from error
 
             return {
                 "crn": crn,
@@ -71,7 +83,9 @@ def parse_section(sections, crn):
                 "comments": cells[12],
             }
 
-    raise ValueError(f"CRN {crn} was not found in the retrieved sections")
+    raise ValueError(
+        f"CRN {crn} was not found in the retrieved sections"
+    )
 
 
 if __name__ == "__main__":
