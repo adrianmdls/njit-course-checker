@@ -1,4 +1,6 @@
 import json
+import os
+import time
 from pathlib import Path
 
 import requests
@@ -50,7 +52,8 @@ def save_state(state):
     temporary_file.replace(STATE_FILE)
 
 
-def main():
+def check_once():
+    """Check configured courses once and save successful results."""
     try:
         with COURSES_FILE.open() as file:
             courses = json.load(file)
@@ -124,5 +127,25 @@ def main():
             print(f"Could not save state: {error}")
 
 
+def main():
+    try:
+        interval = int(os.environ.get("CHECK_INTERVAL", "300"))
+        if interval <= 0:
+            raise ValueError
+    except ValueError:
+        print("CHECK_INTERVAL must be a positive integer in seconds.")
+        return 1
+
+    print(f"Checking courses every {interval} seconds. Press Ctrl+C to stop.")
+    try:
+        while True:
+            check_once()
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print("\nCourse checker stopped.")
+
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

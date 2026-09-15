@@ -1,5 +1,20 @@
 ## Current Operation
 
+Run continuous monitoring from the project root:
+
+```bash
+CHECK_INTERVAL=300 .venv/bin/python src/checker.py
+```
+
+The checker runs immediately, then waits `CHECK_INTERVAL` seconds after each
+check finishes. The default is 300 seconds; the value must be a positive integer.
+Press `Ctrl+C` to stop. Course configuration is reloaded each cycle. Retrieval
+failures preserve previous state and are retried on the next cycle. Successful
+results are saved in `data/state.json`, with console alerts for `CLOSED` to `OPEN`
+changes within the same term.
+
+## Retrieval Test
+
 The current application supports a local Banner retrieval test. Run these commands from the project root after completing the setup instructions in [setup.md](setup.md):
 
 ```bash
@@ -38,4 +53,6 @@ The result shows the matching section's meeting details, instructor, enrollment,
 
 ## Planned Container Operation
 
-Scheduled checks, `CHECK_INTERVAL`, `courses.json` loading, persistent state and logging, notifications, and the `manual-check` command are not implemented yet. Container build, startup, restart, and maintenance commands will be added when those features are available.
+Container support, persistent file logging, external notifications, and the
+`manual-check` command are not implemented yet. Container build, startup,
+restart, and maintenance commands will be added when those features are available.

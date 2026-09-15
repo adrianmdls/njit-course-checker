@@ -138,7 +138,10 @@ With the virtual environment active and courses configured, run the checker from
 python src/checker.py
 ```
 
-The checker retrieves the configured sections, prints the results, saves successful state, and exits.
+The checker retrieves the configured sections immediately, prints the results,
+saves successful state, and repeats after a wait of 300 seconds by default.
+Set `CHECK_INTERVAL` to a positive integer number of seconds to change the wait.
+Press `Ctrl+C` to stop.
 
 If `courses.json` is empty, the program prints:
 
