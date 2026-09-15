@@ -11,7 +11,7 @@ njit-course-checker/
 ├── src/
 │   ├── checker.py          # One-time check and state tracking
 │   ├── njit_scraper.py     # Banner retrieval and parsing
-│   └── manual_check.py     # One-time lookup by subject, course, and section
+│   └── manual_check.py     # One-time check by configured CRN or label
 ├── data/
 │   └── state.json          # Latest successful results
 └── docs/
@@ -93,7 +93,7 @@ Edit `courses.json` in the project root. CRNs are string keys, and values are hu
 }
 ```
 
-These entries are examples, not project defaults. The repository configuration is currently `{}`, meaning no courses are monitored.
+These entries are examples. The repository currently configures `94243` (`IT 101-001`).
 
 Replace the example entries with the sections you want to check.
 
@@ -139,7 +139,7 @@ python src/checker.py
 ```
 
 The checker retrieves the configured sections immediately, prints the results,
-saves successful state, and repeats after a wait of 300 seconds by default.
+saves successful state, and repeats after a wait of 600 seconds (10 minutes) by default.
 Set `CHECK_INTERVAL` to a positive integer number of seconds to change the wait.
 Press `Ctrl+C` to stop.
 

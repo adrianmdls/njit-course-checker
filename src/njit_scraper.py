@@ -30,32 +30,6 @@ def get_sections(subject, term):
     return response.json()
 
 
-def find_section(sections, subject, course, section):
-    """Find a course section and return its details using the CRN parser."""
-    course_name = f"{subject} {course}"
-
-    for item in sections:
-        soup = BeautifulSoup(item["SECTIONS_TABLE"], "html.parser")
-
-        for table in soup.select("table.sections-table"):
-            heading = table.find_previous("h4")
-
-            if not heading or heading.get("id", "").upper() != course_name:
-                continue
-
-            for row in table.select("tr"):
-                cells = row.find_all("td", recursive=False)
-
-                if len(cells) < 2:
-                   continue
-
-                if cells[0].get_text(strip=True) == section:
-                    crn = cells[1].get_text(strip=True)
-                    return parse_section(sections, crn)
-
-    return None
-
-
 def parse_section(sections, crn):
     """Extract one CRN's section details from the retrieved Banner tables."""
     crn = str(crn)

@@ -3,11 +3,12 @@
 Run continuous monitoring from the project root:
 
 ```bash
-CHECK_INTERVAL=300 .venv/bin/python src/checker.py
+.venv/bin/python src/checker.py
 ```
 
 The checker runs immediately, then waits `CHECK_INTERVAL` seconds after each
-check finishes. The default is 300 seconds; the value must be a positive integer.
+check finishes. The default is 600 seconds (10 minutes); the value must be a positive integer.
+For a shorter test interval, run `CHECK_INTERVAL=10 .venv/bin/python src/checker.py`.
 Press `Ctrl+C` to stop. Course configuration is reloaded each cycle. Retrieval
 failures preserve previous state and are retried on the next cycle. Successful
 results are saved in `data/state.json`, with console alerts for `CLOSED` to `OPEN`
@@ -36,13 +37,22 @@ Check that the response is a list and the preview contains CS courses. An empty 
 
 ## Manual Course Lookup
 
-To manually check a course section, run:
+Manual checks only work for courses already listed in `courses.json`.
+
+Check by CRN:
 
 ```bash
-python src/manual_check.py CS 288 005
+python src/manual_check.py 91936
 ```
 
-The arguments are the subject, course number, and section number.
+Or by the exact configured course and section label:
+
+```bash
+python src/manual_check.py "CS 288-005"
+```
+
+These examples require `"91936": "CS 288-005"` in `courses.json`.
+Provide exactly one argument; unconfigured CRNs or labels are rejected.
 
 The script retrieves the requested subject from Banner using `TERM` in
 `src/checker.py` and displays the section's CRN, enrollment, available seats,

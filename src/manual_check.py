@@ -1,40 +1,52 @@
 """Look up one course section without changing automated checker state."""
 
+import json
 import sys
 from datetime import datetime
 
 import requests
 
-from checker import TERM
-from njit_scraper import find_section, get_sections
+from checker import COURSES_FILE, TERM
+from njit_scraper import get_sections, parse_section
 
 
 def main():
-    if len(sys.argv) != 4:
-        print("Usage: python src/manual_check.py SUBJECT COURSE SECTION")
-        print("Example: python src/manual_check.py CS 288 005")
+    if len(sys.argv) != 2:
+        print("Usage: python src/manual_check.py CRN_OR_COURSE")
+        print('Example: python src/manual_check.py "CS 288-005"')
+        print("Example: python src/manual_check.py 91936")
         return
 
-    subject = sys.argv[1].upper()
-    course = sys.argv[2]
-    section = sys.argv[3].zfill(3)
+    try:
+        with COURSES_FILE.open() as file:
+            courses = json.load(file)
+    except (OSError, json.JSONDecodeError) as error:
+        print(f"Could not load courses.json: {error}")
+        return
 
-    label = f"{subject} {course}-{section}"
+    requested = sys.argv[1]
+    if requested in courses:
+        crn = requested
+        label = courses[crn]
+    else:
+        for crn, label in courses.items():
+            if requested == label:
+                break
+        else:
+            print(f"{requested} is not configured in courses.json.")
+            return
+
+    subject = label.split()[0].upper()
     try:
         sections = get_sections(subject, TERM)
-        result = find_section(sections, subject, course, section)
-    except (requests.RequestException, ValueError) as error:
+        result = parse_section(sections, crn)
+    except (requests.RequestException, ValueError, KeyError, TypeError) as error:
         print(f"{label}: lookup failed: {error}")
         return
 
     print(f"CHECKED: {datetime.now():%Y-%m-%d %I:%M:%S %p}")
     print("=" * 40)
-    if result is None:
-        print(label)
-        print("⚠️ Course section not found.")
-        return
-
-    print(f"{label} (CRN {result['crn']})")
+    print(f"{label} (CRN {crn})")
     print(f"Enrollment: {result['current_enrollment']}/{result['max_enrollment']}")
     print(f"Available: {result['seats_remaining']}")
     print(f"Status: {result['status'].title()}")

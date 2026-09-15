@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -61,13 +62,6 @@ def check_once():
         print(f"Could not load courses.json: {error}")
         return
 
-    if not isinstance(courses, dict) or any(
-        not isinstance(label, str) or not label.strip()
-        for label in courses.values()
-    ):
-        print("courses.json must map CRNs to nonempty course labels.")
-        return
-
     if not courses:
         print("No courses configured in courses.json.")
         return
@@ -101,24 +95,29 @@ def check_once():
 
             previous = state["courses"].get(crn, {})
 
+            print(f"CHECKED: {datetime.now():%Y-%m-%d %I:%M:%S %p}")
+            print("=" * 40)
+            print(f"{label} (CRN {crn})")
+            print(
+                f"Enrollment: {section['current_enrollment']}/"
+                f"{section['max_enrollment']}"
+            )
+            print(f"Available: {section['seats_remaining']}")
+            print(f"Status: {section['status'].title()}")
             if (
                 previous.get("status") == "CLOSED"
                 and section["status"] == "OPEN"
             ):
-                print(f"AVAILABLE: {label} (CRN {crn}) is now OPEN!")
+                print("🚨 SEAT AVAILABLE!")
+            elif section["status"] == "CLOSED" or section["seats_remaining"] <= 0:
+                print("❌ No seats available.")
+            print()
 
             state["courses"][crn] = {
                 "status": section["status"],
                 "seats_remaining": section["seats_remaining"],
             }
             state_changed = True
-
-            print(
-                f"{label} (CRN {crn}): {section['status']} | "
-                f"{section['current_enrollment']}/"
-                f"{section['max_enrollment']} enrolled | "
-                f"{section['seats_remaining']} seats remaining"
-            )
 
     if state_changed:
         try:
@@ -129,7 +128,7 @@ def check_once():
 
 def main():
     try:
-        interval = int(os.environ.get("CHECK_INTERVAL", "300"))
+        interval = int(os.environ.get("CHECK_INTERVAL", "600"))
         if interval <= 0:
             raise ValueError
     except ValueError:
