@@ -9,6 +9,34 @@ from njit_scraper import get_sections, parse_section
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 COURSES_FILE = PROJECT_ROOT / "courses.json"
 TERM = "202690"
+STATE_FILE = PROJECT_ROOT / "data" / "state.json"
+
+
+def load_state():
+    try:
+        with STATE_FILE.open() as file:
+            state = json.load(file)
+    except FileNotFoundError:
+        return {}
+
+    if not isinstance(state, dict) or any(
+        not isinstance(section, dict)
+        for section in state.values()
+    ):
+        raise ValueError("State must map CRNs to section objects.")
+
+    return state
+
+
+def save_state(state):
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary_file = STATE_FILE.with_suffix(".tmp")
+
+    with temporary_file.open("w") as file:
+        json.dump(state, file, indent=2)
+        file.write("\n")
+
+    temporary_file.replace(STATE_FILE)
 
 
 def main():
@@ -30,6 +58,14 @@ def main():
         print("No courses configured in courses.json.")
         return
 
+    try:
+        state = load_state()
+    except (OSError, ValueError) as error:
+        print(f"Could not load previous state: {error}")
+        return
+
+    state_changed = False
+
     subjects = {}
     for crn, label in courses.items():
         subject = label.split()[0].upper()
@@ -49,12 +85,30 @@ def main():
                 print(f"{label} (CRN {crn}): check failed — {error}")
                 continue
 
+            previous = state.get(crn, {})
+
+            if (
+                previous.get("term") == TERM
+                and previous.get("status") == "CLOSED"
+                and section["status"] == "OPEN"
+            ):
+                print(f"AVAILABLE: {label} (CRN {crn}) is now OPEN!")
+
+            state[crn] = {**section, "term": TERM}
+            state_changed = True
+
             print(
                 f"{label} (CRN {crn}): {section['status']} | "
                 f"{section['current_enrollment']}/"
                 f"{section['max_enrollment']} enrolled | "
                 f"{section['seats_remaining']} seats remaining"
             )
+
+    if state_changed:
+        try:
+            save_state(state)
+        except OSError as error:
+            print(f"Could not save state: {error}")
 
 
 if __name__ == "__main__":
