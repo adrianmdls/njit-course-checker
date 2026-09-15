@@ -47,7 +47,7 @@ def find_section(sections, subject, course, section):
                 cells = row.find_all("td", recursive=False)
 
                 if len(cells) < 2:
-                     continue
+                   continue
 
                 if cells[0].get_text(strip=True) == section:
                     crn = cells[1].get_text(strip=True)
