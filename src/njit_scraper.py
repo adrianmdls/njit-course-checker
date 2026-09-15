@@ -30,6 +30,31 @@ def get_sections(subject, term):
     return response.json()
 
 
+def find_section(sections, subject, course, section):
+    """Find an exact course/section, then reuse the CRN parser; None if absent."""
+    if not isinstance(sections, list):
+        raise ValueError("Expected a list of Banner course tables")
+
+    for item in sections:
+        if not isinstance(item, dict) or not isinstance(item.get("SECTIONS_TABLE"), str):
+            raise ValueError("Expected a Banner SECTIONS_TABLE string")
+        soup = BeautifulSoup(item["SECTIONS_TABLE"], "html.parser")
+        for table in soup.select("table.sections-table"):
+            heading = table.find_previous("h4")
+            if heading is None or not heading.get("id"):
+                raise ValueError("Missing Banner course heading")
+            if heading["id"].strip().upper() != f"{subject} {course}":
+                continue
+            for row in table.select("tr"):
+                cells = row.find_all("td", recursive=False)
+                if not cells or cells[0].get_text(strip=True).upper() != section:
+                    continue
+                if len(cells) < 2 or not cells[1].get_text(strip=True):
+                    raise ValueError("Missing CRN for requested section")
+                return parse_section([item], cells[1].get_text(strip=True))
+    return None
+
+
 def parse_section(sections, crn):
     """Extract one CRN's section details from the retrieved Banner tables."""
     crn = str(crn)
