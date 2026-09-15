@@ -17,7 +17,7 @@ njit-course-checker/
 ├── courses.json
 ├── src/
 │   ├── checker.py
-│   ├── manual_check.py     # Empty placeholder; manual checking planned
+│   ├── manual_check.py     # One-time check by configured CRN or label
 │   └── njit_scraper.py
 ├── data/
 │   └── state.json

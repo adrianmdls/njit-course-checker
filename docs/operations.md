@@ -3,15 +3,28 @@
 Run continuous monitoring from the project root:
 
 ```bash
-CHECK_INTERVAL=300 .venv/bin/python src/checker.py
+.venv/bin/python src/checker.py
 ```
 
 The checker runs immediately, then waits `CHECK_INTERVAL` seconds after each
-check finishes. The default is 300 seconds; the value must be a positive integer.
+check finishes. The default is 600 seconds (10 minutes); the value must be a positive integer.
+For a shorter test interval, run `CHECK_INTERVAL=10 .venv/bin/python src/checker.py`.
 Press `Ctrl+C` to stop. Course configuration is reloaded each cycle. Retrieval
 failures preserve previous state and are retried on the next cycle. Successful
 results are saved in `data/state.json`, with console alerts for `CLOSED` to `OPEN`
 changes within the same term.
+
+Each cycle prints one summary before the course results: its start time,
+success or error count, and estimated next run time (completion time plus the
+configured interval). Successful checks show instructor, meeting details,
+delivery mode, credits, enrollment, seats remaining, and status.
+
+Each failed course counts as one error, including every affected course when
+a subject request fails. Failure details follow the summary; previous valid
+state is preserved. Configuration or state-file failures are also reported.
+Only a stored `CLOSED` status changing to `OPEN` prints `[NOTIFICATION]` with
+the course, CRN, and remaining seats. A first-time `OPEN` result sets a baseline.
+All output is console-only; file logging and Docker are not implemented.
 
 ## Retrieval Test
 
@@ -34,7 +47,31 @@ python -c 'from src.njit_scraper import get_sections; sections = get_sections("C
 
 Check that the response is a list and the preview contains CS courses. An empty list does not establish that the requested subject and term contain section data.
 
-## Checking One Section
+## Manual Course Lookup
+
+Manual checks only work for courses already listed in `courses.json`.
+
+Check by CRN:
+
+```bash
+python src/manual_check.py 91936
+```
+
+Or by the exact configured course and section label:
+
+```bash
+python src/manual_check.py "CS 288-005"
+```
+
+These examples require `"91936": "CS 288-005"` in `courses.json`.
+Provide exactly one argument; unconfigured CRNs or labels are rejected.
+
+The script retrieves the requested subject from Banner using `TERM` in
+`src/checker.py` and displays the section's CRN, enrollment, available seats,
+and status. It runs once and exits without changing `state.json` or affecting
+the automatic checker.
+
+## Checking One Section by CRN
 
 After installing the updated dependencies from `requirements.txt`, run from the project root with the virtual environment active:
 
@@ -53,6 +90,6 @@ The result shows the matching section's meeting details, instructor, enrollment,
 
 ## Planned Container Operation
 
-Container support, persistent file logging, external notifications, and the
-`manual-check` command are not implemented yet. Container build, startup,
+Container support, persistent file logging, and external notifications are not
+implemented yet. Container build, startup,
 restart, and maintenance commands will be added when those features are available.
