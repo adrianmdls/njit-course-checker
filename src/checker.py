@@ -17,13 +17,24 @@ def load_state():
         with STATE_FILE.open() as file:
             state = json.load(file)
     except FileNotFoundError:
-        return {}
+        return {"term": TERM, "courses": {}}
 
-    if not isinstance(state, dict) or any(
-        not isinstance(section, dict)
-        for section in state.values()
+    if state == {}:
+        return {"term": TERM, "courses": {}}
+
+    if (
+        not isinstance(state, dict)
+        or not isinstance(state.get("term"), str)
+        or not isinstance(state.get("courses"), dict)
+        or any(
+            not isinstance(section, dict)
+            for section in state["courses"].values()
+        )
     ):
-        raise ValueError("State must map CRNs to section objects.")
+        raise ValueError("State must contain a term and a courses object.")
+
+    if state["term"] != TERM:
+        return {"term": TERM, "courses": {}}
 
     return state
 
@@ -85,16 +96,18 @@ def main():
                 print(f"{label} (CRN {crn}): check failed — {error}")
                 continue
 
-            previous = state.get(crn, {})
+            previous = state["courses"].get(crn, {})
 
             if (
-                previous.get("term") == TERM
-                and previous.get("status") == "CLOSED"
+                previous.get("status") == "CLOSED"
                 and section["status"] == "OPEN"
             ):
                 print(f"AVAILABLE: {label} (CRN {crn}) is now OPEN!")
 
-            state[crn] = {**section, "term": TERM}
+            state["courses"][crn] = {
+                "status": section["status"],
+                "seats_remaining": section["seats_remaining"],
+            }
             state_changed = True
 
             print(
