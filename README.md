@@ -1,26 +1,26 @@
 # NJIT Course Availability Checker
 
-A containerized Python application for monitoring NJIT course availability.
+A Python application for monitoring NJIT course availability.
 
 The application will periodically check configured course sections, display enrollment information, track previous availability state, and notify when a previously closed course becomes open.
 
-This project is being developed for IT 610 and is packaged as a single custom Docker container built from an Ubuntu base image.
+This project is being developed for IT 610. Packaging as a single custom Docker container built from an Ubuntu base image is planned.
 
 ## Project Structure
 
 ```text
 njit-course-checker/
+├── .gitignore
 ├── README.md
-├── Dockerfile
+├── Dockerfile              # Empty placeholder; Docker implementation planned
 ├── requirements.txt
 ├── courses.json
 ├── src/
 │   ├── checker.py
-│   ├── manual_check.py
+│   ├── manual_check.py     # Empty placeholder; manual checking planned
 │   └── njit_scraper.py
 ├── data/
-│   ├── state.json
-│   └── checker.log
+│   └── state.json
 └── docs/
     ├── setup.md
     ├── operations.md
@@ -29,7 +29,7 @@ njit-course-checker/
 
 ## Current Status
 
-The Python retrieval foundation is implemented and has been verified with IT and CS data from NJIT Banner. A section can be extracted by CRN to show meeting details, enrollment, seats remaining, and status. Container operation, scheduling, persistent state, and notifications are still planned.
+Banner retrieval and section parsing are implemented. The checker monitors configured CRNs at a configurable interval, saves availability state, and prints alerts when a section changes from closed to open. Container operation, file logging, and external notifications are still planned.
 
 ## Documentation
 
