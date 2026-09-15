@@ -29,10 +29,10 @@ njit-course-checker/
 
 ## Current Status
 
-The Python retrieval foundation is implemented and has been verified with IT and CS data from NJIT Banner. Container operation, section parsing, scheduling, persistent state, and notifications are still planned.
+The Python retrieval foundation is implemented and has been verified with IT and CS data from NJIT Banner. A section can be extracted by CRN to show meeting details, enrollment, seats remaining, and status. Container operation, scheduling, persistent state, and notifications are still planned.
 
 ## Documentation
 
 - [Setup](docs/setup.md): project structure, local environment, dependencies, and request construction.
-- [Operations](docs/operations.md): running the current retrieval test.
+- [Operations](docs/operations.md): running retrieval and single-section parsing tests.
 - [Troubleshooting](docs/troubleshooting.md): common errors, diagnostics, and fixes.

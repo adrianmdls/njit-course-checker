@@ -1,6 +1,6 @@
 ## Missing Python Dependencies
 
-If the script reports `ModuleNotFoundError: No module named 'requests'`, the virtual environment may not be active or its dependencies may not be installed.
+If the script reports `ModuleNotFoundError` for `requests` or `bs4`, the virtual environment may not be active or its dependencies may not be installed. The `bs4` import is provided by the `beautifulsoup4` package.
 
 From the project root, run:
 
@@ -36,6 +36,14 @@ A JSON decoding error means the response could not be parsed as JSON. The server
 
 For diagnosis, temporarily print the response status, content type, and a short response-body preview before `response.json()` in `get_sections()`. Avoid printing cookies or session values.
 
-HTML inside the `SECTIONS_TABLE` field is expected: Banner returns a JSON list containing HTML tables. Individual section parsing will be implemented separately.
+HTML inside the `SECTIONS_TABLE` field is expected: Banner returns a JSON list containing HTML tables. Use `parse_section(sections, crn)` to extract one section from that response.
 
 If the result is empty or contains unexpected courses, check the subject and term passed to `get_sections()`. IT and CS have been verified with term `202690`; other terms have not yet been verified.
+
+## Section Parsing Errors
+
+If `parse_section()` reports that a CRN was not found, confirm that the CRN appears in the retrieved subject and term. A missing section is an error, not evidence that it is closed.
+
+An unexpected column count, invalid enrollment value, or unrecognized status means the matching row could not be interpreted using the verified layout. Inspect that row in the response preview or the NJIT schedule page before updating the parser. Do not replace unreadable enrollment with zero.
+
+The parser currently returns the first matching row. If Banner lists additional meeting rows for a section, those rows are not combined into the result yet.
