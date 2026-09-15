@@ -36,22 +36,18 @@ Check that the response is a list and the preview contains CS courses. An empty 
 
 ## Manual Course Lookup
 
-With the virtual environment active, run from the project root:
+To manually check a course section, run:
 
 ```bash
 python src/manual_check.py CS 288 005
 ```
 
-Supply a subject, course number, and section. Lowercase input is uppercased;
-numeric sections are padded to three digits (`cs 288 5` becomes `CS 288-005`).
-The script uses `TERM` from `src/checker.py`, fetches only the requested subject,
-and finds the CRN from Banner. It prints a local timestamp, enrollment, seats
-remaining, and Banner status, then exits. The seat-available indicator requires
-both an OPEN status and a positive seat count.
+The arguments are the subject, course number, and section number.
 
-This lookup does not read `courses.json`, write state or logs, send notifications,
-or start the monitoring loop. Exit codes are 0 for a found section (open or closed),
-1 for a missing section or lookup failure, and 2 for invalid command-line arguments.
+The script retrieves the requested subject from Banner using `TERM` in
+`src/checker.py` and displays the section's CRN, enrollment, available seats,
+and status. It runs once and exits without changing `state.json` or affecting
+the automatic checker.
 
 ## Checking One Section by CRN
 

@@ -10,14 +10,9 @@ from njit_scraper import get_sections, parse_section
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 COURSES_FILE = PROJECT_ROOT / "courses.json"
+TERM = "202690"
 STATE_FILE = PROJECT_ROOT / "data" / "state.json"
 
-# TERM FORMAT
-# YYYY10 = Spring
-# YYYY50 = Summer
-# YYYY90 = Fall
-# YYYY91 = Winter following that Fall
-TERM = "202690"
 
 def load_state():
     try:
