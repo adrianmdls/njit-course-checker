@@ -46,8 +46,8 @@ def find_section(sections, subject, course, section):
             for row in table.select("tr"):
                 cells = row.find_all("td", recursive=False)
 
-                if not cells:
-                    continue
+                if len(cells) < 2:
+                     continue
 
                 if cells[0].get_text(strip=True) == section:
                     crn = cells[1].get_text(strip=True)

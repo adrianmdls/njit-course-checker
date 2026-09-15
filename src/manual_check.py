@@ -23,7 +23,7 @@ def main():
     try:
         sections = get_sections(subject, TERM)
         result = find_section(sections, subject, course, section)
-    except (requests.RequestException, ValueError, KeyError, TypeError) as error:
+    except (requests.RequestException, ValueError) as error:
         print(f"{label}: lookup failed: {error}")
         return
 
