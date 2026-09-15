@@ -1,97 +1,157 @@
-## Initial Project Structure
+# Setup
 
-The initial project skeleton was created to separate application source code, configuration, persistent runtime data, and documentation.
+## Initial Project Structure
 
 ```text
 njit-course-checker/
 ├── README.md
-├── Dockerfile
+├── Dockerfile              # Empty placeholder
 ├── requirements.txt
 ├── courses.json
 ├── src/
-│   ├── checker.py
-│   ├── manual_check.py
-│   └── njit_scraper.py
+│   ├── checker.py          # One-time check and state tracking
+│   ├── njit_scraper.py     # Banner retrieval and parsing
+│   └── manual_check.py     # Empty placeholder
 ├── data/
-│   ├── state.json
-│   └── checker.log
+│   └── state.json          # Latest successful results
 └── docs/
     ├── setup.md
     ├── operations.md
     └── troubleshooting.md
 ```
 
-The current implementation retrieves course section data from NJIT Banner. The Dockerfile, scheduled checker, manual checker, and persistent data handling are still placeholders.
+Source code, course configuration, runtime state, and documentation are kept separately. The application does not currently write a log file.
 
 ## Local Python Environment
 
-A Python virtual environment is used for local development so project dependencies remain isolated from the system-wide Python installation.
+Install Python 3 with `venv` and `pip` support. After cloning the repository, open a terminal in the project root.
 
-From the project root, create the virtual environment:
+Create and activate a virtual environment on macOS or Linux:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-Install the project dependencies:
+The `.venv` directory is excluded from version control.
+
+## Python Dependencies
+
+Install the versions listed in `requirements.txt`:
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-The virtual environment is local to this repository and is excluded from version control by `.gitignore`. Python cache files are also excluded.
+The direct dependencies are:
 
-## Python Dependencies
+- `requests`: sends HTTP requests to NJIT Banner.
+- `beautifulsoup4`: parses section tables in the Banner response.
 
-`requirements.txt` records the installed package versions so the local environment can be recreated.
+`base64`, `json`, `pathlib`, and `urllib.parse` are Python standard-library modules and do not belong in `requirements.txt`.
 
-- `requests` sends HTTP requests to NJIT Banner.
-- `beautifulsoup4` extracts section details from the HTML tables using Python's built-in `html.parser`.
-- `soupsieve` and `typing_extensions` are dependencies used by `beautifulsoup4`.
-- `certifi`, `charset-normalizer`, `idna`, and `urllib3` are dependencies used by `requests`.
-- `base64` and `urllib.parse` are included in the Python standard library and do not require installation.
+## Banner Data Retrieval
 
-## Banner Request Construction
-
-`src/njit_scraper.py` provides `get_sections(subject, term)` to retrieve section data from the following endpoint:
+`src/njit_scraper.py` dynamically constructs requests to the NJIT Banner section endpoint:
 
 ```text
 https://generalssb-prod.ec.njit.edu/BannerExtensibility/internalPb/virtualDomains.stuRegCrseSchedSections
 ```
 
-The subject and term are Base64 encoded and then URL encoded. The numeric prefixes and remaining parameters are preserved from the verified Banner request because their full meaning has not been established. No copied browser cookies or session credentials are included.
+The requested subject and term are encoded in the format expected by Banner. The same endpoint can retrieve different subjects, so separate hardcoded department URLs are unnecessary.
 
-The request uses a 30-second timeout and checks for HTTP errors before decoding the response as JSON. Retrieval and JSON decoding errors propagate to the caller.
+The request does not require stored browser cookies or authentication credentials.
 
-## Retrieval Verification
-
-From the project root, with the virtual environment active, run:
-
-```bash
-python src/njit_scraper.py
-```
-
-The script requests IT sections for term `202690` and prints the JSON type and the first 2,000 characters of the response representation. Successful verification returned a JSON list containing HTML section tables in `SECTIONS_TABLE`. The table includes section, CRN, meeting details, status, maximum enrollment, current enrollment, instructor, and other section information.
-
-Both IT and CS retrieval were verified for term `202690`. Other terms have not yet been verified.
-
-Importing the module does not make a request or print output. The preview runs only when the file is executed directly.
+Banner returns JSON containing HTML section-table data, which the application parses.
 
 ## Section Parsing
 
-`parse_section(sections, crn)` reads the HTML in each `SECTIONS_TABLE` field and returns the first section row whose CRN matches the requested value. Pass the JSON returned by `get_sections()` as `sections`. Parsing does not make an additional network request.
+The parser extracts:
 
-The returned dictionary includes CRN, section, days, meeting time, location, instructor, delivery mode, credits, information, and comments. Enrollment values are integers. `seats_remaining` is maximum enrollment minus current enrollment; an over-capacity section can therefore have a negative value. `status` is Banner's reported status converted to `OPEN` or `CLOSED`.
+- CRN
+- Section
+- Status
+- Maximum enrollment
+- Current enrollment
+- Seats remaining
+- Days
+- Meeting time
+- Location
+- Instructor
+- Delivery mode
 
-The parser uses the verified 13-column table layout. It raises `ValueError` if the CRN is missing, a matching row has an unexpected column count, enrollment cannot be converted to integers, or the reported status is unrecognized. These errors are not converted into a closed or zero-seat result.
+Malformed enrollment data or a missing CRN produces an error rather than silently treating the section as closed.
 
-CRN `94243` was checked against the live IT table for term `202690`. At verification, the section was open with 28 students enrolled out of 35 and 7 seats remaining. Enrollment can change after this check.
+## Course Configuration
 
-The parser returns the first matching row only; it does not combine separate meeting rows. It does not read `courses.json` or validate course names against CRNs. The configured course name will be used when configuration loading is implemented.
+Edit `courses.json` in the project root. CRNs are string keys, and values are human-readable course labels:
 
-Beautiful Soup usage follows the [official documentation](https://www.crummy.com/software/BeautifulSoup/bs4/doc/).
+```json
+{
+  "94243": "IT 101-001",
+  "94244": "IT 101-003"
+}
+```
 
-## Container Setup Status
+These entries are examples, not project defaults. The repository configuration is currently `{}`, meaning no courses are monitored.
 
-Container construction and startup are not implemented yet. Docker dependencies, source installation, read-only course configuration, persistent storage, timezone, interval configuration, and restart policy will be documented here as they are implemented.
+Replace the example entries with the sections you want to check.
+
+Each label must currently begin with its Banner subject, such as `IT` or `CS`, because the checker uses the first word of the label when retrieving section data.
+
+For example:
+
+```json
+{
+  "94243": "IT 101-001",
+  "91500": "CS 100-003"
+}
+```
+
+The label itself is not checked against the course name returned by Banner.
+
+The term is currently set by the `TERM` constant in `src/checker.py`. The current value is:
+
+```text
+202690
+```
+
+Configure CRNs that belong to that term.
+
+## Persistent State
+
+`data/state.json` stores the latest successful result for each monitored CRN.
+
+The first successful check establishes a baseline. On later runs, a section changing from `CLOSED` to `OPEN` produces a console notification.
+
+Failed checks do not overwrite the previous successful state.
+
+The checker creates the data directory and state file if needed. The directory must be writable.
+
+Local state persists between runs. Persistent Docker storage for this directory will be configured when container support is implemented.
+
+## Initial Run
+
+With the virtual environment active and courses configured, run the checker from the project root:
+
+```bash
+python src/checker.py
+```
+
+The checker retrieves the configured sections, prints the results, saves successful state, and exits.
+
+If `courses.json` is empty, the program prints:
+
+```text
+No courses configured in courses.json.
+```
+
+See [operations](operations.md) for subsequent usage and [troubleshooting](troubleshooting.md) for common errors.
+
+## Container Setup
+
+Container support is not yet implemented.
+
+The current `Dockerfile` is an empty placeholder, so there is not yet a working image build or container startup process.
+
+Docker build instructions, runtime configuration, and persistent storage setup will be added once the container implementation is complete.
