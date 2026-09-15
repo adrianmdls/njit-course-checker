@@ -11,7 +11,7 @@ njit-course-checker/
 ├── src/
 │   ├── checker.py          # One-time check and state tracking
 │   ├── njit_scraper.py     # Banner retrieval and parsing
-│   └── manual_check.py     # Empty placeholder
+│   └── manual_check.py     # One-time lookup by subject, course, and section
 ├── data/
 │   └── state.json          # Latest successful results
 └── docs/

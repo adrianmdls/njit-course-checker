@@ -34,7 +34,26 @@ python -c 'from src.njit_scraper import get_sections; sections = get_sections("C
 
 Check that the response is a list and the preview contains CS courses. An empty list does not establish that the requested subject and term contain section data.
 
-## Checking One Section
+## Manual Course Lookup
+
+With the virtual environment active, run from the project root:
+
+```bash
+python src/manual_check.py CS 288 005
+```
+
+Supply a subject, course number, and section. Lowercase input is uppercased;
+numeric sections are padded to three digits (`cs 288 5` becomes `CS 288-005`).
+The script uses `TERM` from `src/checker.py`, fetches only the requested subject,
+and finds the CRN from Banner. It prints a local timestamp, enrollment, seats
+remaining, and Banner status, then exits. The seat-available indicator requires
+both an OPEN status and a positive seat count.
+
+This lookup does not read `courses.json`, write state or logs, send notifications,
+or start the monitoring loop. Exit codes are 0 for a found section (open or closed),
+1 for a missing section or lookup failure, and 2 for invalid command-line arguments.
+
+## Checking One Section by CRN
 
 After installing the updated dependencies from `requirements.txt`, run from the project root with the virtual environment active:
 
@@ -53,6 +72,6 @@ The result shows the matching section's meeting details, instructor, enrollment,
 
 ## Planned Container Operation
 
-Container support, persistent file logging, external notifications, and the
-`manual-check` command are not implemented yet. Container build, startup,
+Container support, persistent file logging, and external notifications are not
+implemented yet. Container build, startup,
 restart, and maintenance commands will be added when those features are available.
