@@ -15,7 +15,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 COURSES_FILE = PROJECT_ROOT / "courses.json"
 STATE_FILE = PROJECT_ROOT / "data" / "state.json"
 LOG_FILE = PROJECT_ROOT / "data" / "checker.log"
+NOTIFICATION_LOG_FILE = PROJECT_ROOT / "data" / "notification.log"
 logger = logging.getLogger(__name__)
+notification_logger = logging.getLogger("notifications")
 
 
 def load_config():
@@ -149,6 +151,14 @@ def check_once(persist_state=True):
                     section["max_enrollment"],
                     section["seats_remaining"],
                 )
+            if persist_state and became_open:
+                notification_logger.info(
+                    "%s | CRN %s | OPENED | %s seat%s remaining",
+                    label,
+                    crn,
+                    section["seats_remaining"],
+                    "" if section["seats_remaining"] == 1 else "s",
+                )
             results.append(result)
 
             state["courses"][crn] = {
@@ -177,6 +187,18 @@ def setup_logging():
         datefmt="%Y-%m-%d %H:%M:%S",
         encoding="utf-8",
     )
+    if not notification_logger.handlers:
+        notification_handler = logging.FileHandler(
+            NOTIFICATION_LOG_FILE,
+            encoding="utf-8",
+        )
+        notification_handler.setFormatter(logging.Formatter(
+            "%(asctime)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        notification_logger.addHandler(notification_handler)
+    notification_logger.setLevel(logging.INFO)
+    notification_logger.propagate = False
 
 
 def main():
