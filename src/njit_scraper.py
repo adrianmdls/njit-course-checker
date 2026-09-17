@@ -86,9 +86,3 @@ def parse_section(sections, crn):
     raise ValueError(
         f"CRN {crn} was not found in the retrieved sections"
     )
-
-
-if __name__ == "__main__":
-    sections = get_sections("IT", "202690")
-    print("JSON type:", type(sections).__name__)
-    print("Response preview:", str(sections)[:2000])
