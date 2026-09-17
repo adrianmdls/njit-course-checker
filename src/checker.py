@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 from datetime import datetime, timedelta
@@ -11,19 +12,37 @@ from njit_scraper import get_sections, parse_section
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 COURSES_FILE = PROJECT_ROOT / "courses.json"
-TERM = "202690"
 STATE_FILE = PROJECT_ROOT / "data" / "state.json"
+LOG_FILE = PROJECT_ROOT / "data" / "checker.log"
+logger = logging.getLogger(__name__)
 
 
-def load_state():
+def load_config():
+    with COURSES_FILE.open() as file:
+        config = json.load(file)
+    if (
+        not isinstance(config, dict)
+        or not isinstance(config.get("term"), str)
+        or not config["term"].strip()
+        or not isinstance(config.get("courses"), dict)
+        or any(
+            not isinstance(label, str) or not label.strip()
+            for label in config["courses"].values()
+        )
+    ):
+        raise ValueError("Configuration must contain a nonempty term string and a courses object with nonempty labels.")
+    return config["term"], config["courses"]
+
+
+def load_state(term):
     try:
         with STATE_FILE.open() as file:
             state = json.load(file)
     except FileNotFoundError:
-        return {"term": TERM, "courses": {}}
+        return {"term": term, "courses": {}}
 
     if state == {}:
-        return {"term": TERM, "courses": {}}
+        return {"term": term, "courses": {}}
 
     if (
         not isinstance(state, dict)
@@ -36,8 +55,8 @@ def load_state():
     ):
         raise ValueError("State must contain a term and a courses object.")
 
-    if state["term"] != TERM:
-        return {"term": TERM, "courses": {}}
+    if state["term"] != term:
+        return {"term": term, "courses": {}}
 
     return state
 
@@ -58,17 +77,19 @@ def check_once():
     results = []
     errors = 0
     try:
-        with COURSES_FILE.open() as file:
-            courses = json.load(file)
-    except (OSError, json.JSONDecodeError) as error:
+        term, courses = load_config()
+    except (OSError, ValueError) as error:
+        logger.error("Could not load courses.json: %s", error)
         return [f"ERROR: Could not load courses.json: {error}"], 1
 
     if not courses:
+        logger.info("No courses configured in courses.json.")
         return ["No courses configured in courses.json."], 0
 
     try:
-        state = load_state()
+        state = load_state(term)
     except (OSError, ValueError) as error:
+        logger.error("Could not load previous state: %s", error)
         return [f"ERROR: Could not load previous state: {error}"], len(courses)
 
     state_changed = False
@@ -80,10 +101,14 @@ def check_once():
 
     for subject, configured_courses in subjects.items():
         try:
-            sections = get_sections(subject, TERM)
+            sections = get_sections(subject, term)
         except (requests.RequestException, ValueError) as error:
             errors += len(configured_courses)
             for crn, label in configured_courses:
+                logger.error(
+                    "%s | CRN %s | Could not retrieve %s course data: %s",
+                    label, crn, subject, error,
+                )
                 results.append(
                     "=" * 40 + f"\n{label}, CRN: {crn}\n"
                     f"ERROR: Could not retrieve {subject} course data: {error}\n"
@@ -108,9 +133,14 @@ def check_once():
                 )
             except (ValueError, KeyError, TypeError) as error:
                 errors += 1
+                logger.error("%s | CRN %s | Could not check course: %s", label, crn, error)
                 results.append(heading + f"ERROR: Could not check course: {error}\n")
                 continue
 
+            logger.info(
+                "%s | CRN %s | %s | %s seats remaining",
+                label, crn, section["status"], section["seats_remaining"],
+            )
             previous = state["courses"].get(crn, {})
             if (
                 previous.get("status") == "CLOSED"
@@ -133,17 +163,27 @@ def check_once():
             save_state(state)
         except OSError as error:
             errors += 1
+            logger.error("Could not save state: %s", error)
             results.append(f"ERROR: Could not save state: {error}")
 
     return results, errors
 
 
 def main():
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        filename=LOG_FILE,
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        encoding="utf-8",
+    )
     try:
         interval = int(os.environ.get("CHECK_INTERVAL", "600"))
         if interval <= 0:
             raise ValueError
     except ValueError:
+        logger.error("CHECK_INTERVAL must be a positive integer in seconds.")
         print("CHECK_INTERVAL must be a positive integer in seconds.")
         return 1
 
@@ -151,7 +191,12 @@ def main():
     try:
         while True:
             started = datetime.now()
+            logger.info("Check cycle started")
             results, errors = check_once()
+            if errors:
+                logger.error("Check cycle completed with %s error(s)", errors)
+            else:
+                logger.info("Check cycle completed successfully")
             next_run = datetime.now() + timedelta(seconds=interval)
 
             print(f"Time: {started.strftime('%I:%M:%S %p').lstrip('0')}")

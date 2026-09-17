@@ -1,12 +1,11 @@
 """Look up one course section without changing automated checker state."""
 
-import json
 import sys
 from datetime import datetime
 
 import requests
 
-from checker import COURSES_FILE, TERM
+from checker import load_config
 from njit_scraper import get_sections, parse_section
 
 
@@ -18,9 +17,8 @@ def main():
         return
 
     try:
-        with COURSES_FILE.open() as file:
-            courses = json.load(file)
-    except (OSError, json.JSONDecodeError) as error:
+        term, courses = load_config()
+    except (OSError, ValueError) as error:
         print(f"Could not load courses.json: {error}")
         return
 
@@ -38,7 +36,7 @@ def main():
 
     subject = label.split()[0].upper()
     try:
-        sections = get_sections(subject, TERM)
+        sections = get_sections(subject, term)
         result = parse_section(sections, crn)
     except (requests.RequestException, ValueError, KeyError, TypeError) as error:
         print(f"{label}: lookup failed: {error}")

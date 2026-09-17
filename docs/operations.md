@@ -24,7 +24,14 @@ a subject request fails. Failure details follow the summary; previous valid
 state is preserved. Configuration or state-file failures are also reported.
 Only a stored `CLOSED` status changing to `OPEN` prints `[NOTIFICATION]` with
 the course, CRN, and remaining seats. A first-time `OPEN` result sets a baseline.
-All output is console-only; file logging and Docker are not implemented.
+Console output is also accompanied by persistent operational logging in
+`data/checker.log`. Each cycle logs its start, each course's label, CRN, status,
+and seats remaining on success, and whether the cycle completed successfully
+or with errors. Errors identify the affected course or operation at ERROR level.
+Entries include timestamps and are appended across runs. The checker creates
+`data/` if needed. `state.json` stores the last successful availability state
+for transition detection; `checker.log` records operational history.
+Docker and external notifications are not implemented.
 
 ## Retrieval Test
 
@@ -66,10 +73,10 @@ python src/manual_check.py "CS 288-005"
 These examples require `"91936": "CS 288-005"` in `courses.json`.
 Provide exactly one argument; unconfigured CRNs or labels are rejected.
 
-The script retrieves the requested subject from Banner using `TERM` in
-`src/checker.py` and displays the section's CRN, enrollment, available seats,
+The script retrieves the requested subject from Banner using `term` in
+`courses.json` and displays the section's CRN, enrollment, available seats,
 and status. It runs once and exits without changing `state.json` or affecting
-the automatic checker.
+the automatic checker. Manual checks do not create or write to `checker.log`.
 
 ## Checking One Section by CRN
 
@@ -90,6 +97,6 @@ The result shows the matching section's meeting details, instructor, enrollment,
 
 ## Planned Container Operation
 
-Container support, persistent file logging, and external notifications are not
+Container support and external notifications are not
 implemented yet. Container build, startup,
 restart, and maintenance commands will be added when those features are available.

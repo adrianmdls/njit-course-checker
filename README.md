@@ -20,7 +20,8 @@ njit-course-checker/
 │   ├── manual_check.py     # One-time check by configured CRN or label
 │   └── njit_scraper.py
 ├── data/
-│   └── state.json
+│   ├── state.json
+│   └── checker.log          # Automated checker activity (created at runtime)
 └── docs/
     ├── setup.md
     ├── operations.md
@@ -29,7 +30,7 @@ njit-course-checker/
 
 ## Current Status
 
-Banner retrieval and section parsing are implemented. The checker monitors configured CRNs at a configurable interval, saves availability state, and prints alerts when a section changes from closed to open. Container operation, file logging, and external notifications are still planned.
+Banner retrieval and section parsing are implemented. The checker monitors configured CRNs at a configurable interval, saves availability state, logs automated activity to `data/checker.log`, and prints alerts when a section changes from closed to open. Container operation and external notifications are still planned.
 
 ## Documentation
 
