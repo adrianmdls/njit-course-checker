@@ -8,7 +8,7 @@ from pathlib import Path
 import requests
 
 from njit_scraper import get_sections, parse_section
-from output import print_results
+from output import format_course, print_results
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -73,28 +73,30 @@ def save_state(state):
     temporary_file.replace(STATE_FILE)
 
 
-def check_once(track_state=True):
+def check_once(persist_state=True):
     """Check configured courses; optionally persist state and log activity."""
-    log = logger if track_state else logging.Logger("manual_check", logging.CRITICAL + 1)
     results = []
     errors = 0
     try:
         term, courses = load_config()
     except (OSError, ValueError) as error:
-        log.error("Could not load courses.json: %s", error)
+        if persist_state:
+            logger.error("Could not load courses.json: %s", error)
         return [f"ERROR: Could not load courses.json: {error}"], 1
 
     if not courses:
-        log.info("No courses configured in courses.json.")
+        if persist_state:
+            logger.info("No courses configured in courses.json.")
         return ["No courses configured in courses.json."], 0
 
     try:
-        state = load_state(term) if track_state else {"term": term, "courses": {}}
+        state = load_state(term) if persist_state else {"term": term, "courses": {}}
     except (OSError, ValueError) as error:
-        log.error("Could not load previous state: %s", error)
+        if persist_state:
+            logger.error("Could not load previous state: %s", error)
         return [f"ERROR: Could not load previous state: {error}"], len(courses)
 
-    state_changed = False
+    state_updated = False
 
     subjects = {}
     for crn, label in courses.items():
@@ -107,10 +109,11 @@ def check_once(track_state=True):
         except (requests.RequestException, ValueError) as error:
             errors += len(configured_courses)
             for crn, label in configured_courses:
-                log.error(
-                    "%s | CRN %s | Could not retrieve %s course data: %s",
-                    label, crn, subject, error,
-                )
+                if persist_state:
+                    logger.error(
+                        "%s | CRN %s | Could not retrieve %s course data: %s",
+                        label, crn, subject, error,
+                    )
                 results.append(
                     "=" * 40 + f"\n{label}, CRN: {crn}\n"
                     f"ERROR: Could not retrieve {subject} course data: {error}\n"
@@ -121,57 +124,51 @@ def check_once(track_state=True):
             heading = "=" * 40 + f"\n{label}, CRN: {crn}\n"
             try:
                 section = parse_section(sections, crn)
-                details = (
-                    f"Instructor: {section['instructor']}\n"
-                    f"Days: {section['days']}\n"
-                    f"Meeting Time: {section['meeting_time']}\n"
-                    f"Location: {section['location']}\n"
-                    f"Delivery Mode: {section['delivery_mode']}\n"
-                    f"Credits: {section['credits']}\n"
-                    f"Current Enrollment: {section['current_enrollment']} / "
-                    f"{section['max_enrollment']}\n"
-                    f"Seats Remaining: {section['seats_remaining']}\n"
-                    f"STATUS: {section['status']}\n"
+                previous = state["courses"].get(crn, {})
+                became_open = (
+                    previous.get("status") == "CLOSED"
+                    and section["status"] == "OPEN"
+                )
+                result = format_course(
+                    label, crn, section, notification=became_open,
                 )
             except (ValueError, KeyError, TypeError) as error:
                 errors += 1
-                log.error("%s | CRN %s | Could not check course: %s", label, crn, error)
+                if persist_state:
+                    logger.error("%s | CRN %s | Could not check course: %s", label, crn, error)
                 results.append(heading + f"ERROR: Could not check course: {error}\n")
                 continue
 
-            log.info(
-                "%s | CRN %s | %s | %s seats remaining",
-                label, crn, section["status"], section["seats_remaining"],
-            )
-            previous = state["courses"].get(crn, {})
-            if (
-                previous.get("status") == "CLOSED"
-                and section["status"] == "OPEN"
-            ):
-                details += (
-                    f"\n[NOTIFICATION]\n{label}, CRN: {crn} is now OPEN.\n"
-                    f"Seats Remaining: {section['seats_remaining']}\n"
+            if persist_state:
+                logger.info(
+                    "%s | CRN %s | %s | %s/%s enrolled | %s seats remaining",
+                    label,
+                    crn,
+                    section["status"],
+                    section["current_enrollment"],
+                    section["max_enrollment"],
+                    section["seats_remaining"],
                 )
-            results.append(heading + details)
+            results.append(result)
 
             state["courses"][crn] = {
                 "status": section["status"],
                 "seats_remaining": section["seats_remaining"],
             }
-            state_changed = True
+            state_updated = True
 
-    if track_state and state_changed:
+    if persist_state and state_updated:
         try:
             save_state(state)
         except OSError as error:
             errors += 1
-            log.error("Could not save state: %s", error)
+            logger.error("Could not save state: %s", error)
             results.append(f"ERROR: Could not save state: {error}")
 
     return results, errors
 
 
-def main():
+def setup_logging():
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         filename=LOG_FILE,
@@ -180,6 +177,10 @@ def main():
         datefmt="%Y-%m-%d %H:%M:%S",
         encoding="utf-8",
     )
+
+
+def main():
+    setup_logging()
     try:
         interval = int(os.environ.get("CHECK_INTERVAL", "600"))
         if interval <= 0:
