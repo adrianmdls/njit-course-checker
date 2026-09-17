@@ -8,6 +8,7 @@ from pathlib import Path
 import requests
 
 from njit_scraper import get_sections, parse_section
+from output import print_results
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -72,24 +73,25 @@ def save_state(state):
     temporary_file.replace(STATE_FILE)
 
 
-def check_once():
-    """Check courses, save successful state, and collect console output."""
+def check_once(track_state=True):
+    """Check configured courses; optionally persist state and log activity."""
+    log = logger if track_state else logging.Logger("manual_check", logging.CRITICAL + 1)
     results = []
     errors = 0
     try:
         term, courses = load_config()
     except (OSError, ValueError) as error:
-        logger.error("Could not load courses.json: %s", error)
+        log.error("Could not load courses.json: %s", error)
         return [f"ERROR: Could not load courses.json: {error}"], 1
 
     if not courses:
-        logger.info("No courses configured in courses.json.")
+        log.info("No courses configured in courses.json.")
         return ["No courses configured in courses.json."], 0
 
     try:
-        state = load_state(term)
+        state = load_state(term) if track_state else {"term": term, "courses": {}}
     except (OSError, ValueError) as error:
-        logger.error("Could not load previous state: %s", error)
+        log.error("Could not load previous state: %s", error)
         return [f"ERROR: Could not load previous state: {error}"], len(courses)
 
     state_changed = False
@@ -105,7 +107,7 @@ def check_once():
         except (requests.RequestException, ValueError) as error:
             errors += len(configured_courses)
             for crn, label in configured_courses:
-                logger.error(
+                log.error(
                     "%s | CRN %s | Could not retrieve %s course data: %s",
                     label, crn, subject, error,
                 )
@@ -133,11 +135,11 @@ def check_once():
                 )
             except (ValueError, KeyError, TypeError) as error:
                 errors += 1
-                logger.error("%s | CRN %s | Could not check course: %s", label, crn, error)
+                log.error("%s | CRN %s | Could not check course: %s", label, crn, error)
                 results.append(heading + f"ERROR: Could not check course: {error}\n")
                 continue
 
-            logger.info(
+            log.info(
                 "%s | CRN %s | %s | %s seats remaining",
                 label, crn, section["status"], section["seats_remaining"],
             )
@@ -158,12 +160,12 @@ def check_once():
             }
             state_changed = True
 
-    if state_changed:
+    if track_state and state_changed:
         try:
             save_state(state)
         except OSError as error:
             errors += 1
-            logger.error("Could not save state: %s", error)
+            log.error("Could not save state: %s", error)
             results.append(f"ERROR: Could not save state: {error}")
 
     return results, errors
@@ -199,18 +201,7 @@ def main():
                 logger.info("Check cycle completed successfully")
             next_run = datetime.now() + timedelta(seconds=interval)
 
-            print(f"Time: {started.strftime('%I:%M:%S %p').lstrip('0')}")
-            if errors:
-                print(
-                    f"Status: Scrape Completed with {errors} "
-                    f"{'Error' if errors == 1 else 'Errors'}"
-                )
-            else:
-                print("Status: Scrape Completed Successfully")
-            print(f"Next Run: {next_run.strftime('%I:%M:%S %p').lstrip('0')}")
-            print()
-            print("\n".join(results))
-            print()
+            print_results(started, results, errors, next_run)
             time.sleep(interval)
     except KeyboardInterrupt:
         print("\nCourse checker stopped.")

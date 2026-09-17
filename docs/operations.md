@@ -54,29 +54,20 @@ python -c 'from src.njit_scraper import get_sections; sections = get_sections("C
 
 Check that the response is a list and the preview contains CS courses. An empty list does not establish that the requested subject and term contain section data.
 
-## Manual Course Lookup
+## Manual Course Check
 
-Manual checks only work for courses already listed in `courses.json`.
-
-Check by CRN:
+Check every course configured in `courses.json` once:
 
 ```bash
-python src/manual_check.py 91936
+python src/manual_check.py
 ```
 
-Or by the exact configured course and section label:
-
-```bash
-python src/manual_check.py "CS 288-005"
-```
-
-These examples require `"91936": "CS 288-005"` in `courses.json`.
-Provide exactly one argument; unconfigured CRNs or labels are rejected.
-
-The script retrieves the requested subject from Banner using `term` in
-`courses.json` and displays the section's CRN, enrollment, available seats,
-and status. It runs once and exits without changing `state.json` or affecting
-the automatic checker. Manual checks do not create or write to `checker.log`.
+No command-line arguments are needed. The script reads the same term and courses
+as the automated checker and uses the same summary, detailed course output, and
+error formatting. The summary shows `Next Run: N/A (manual check)`.
+It exits after one check, returning a nonzero exit code if any errors occurred.
+Manual checks do not read or write `state.json`, generate change notifications,
+or write to `checker.log`.
 
 ## Checking One Section by CRN
 
