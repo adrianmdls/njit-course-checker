@@ -9,18 +9,19 @@ njit-course-checker/
 ├── requirements.txt
 ├── courses.json
 ├── src/
-│   ├── checker.py          # One-time check and state tracking
+│   ├── checker.py          # Continuous checking, state tracking, and logging
 │   ├── njit_scraper.py     # Banner retrieval and parsing
 │   └── manual_check.py     # One-time check by configured CRN or label
 ├── data/
-│   └── state.json          # Latest successful results
+│   ├── state.json          # Latest successful results
+│   └── checker.log         # Automated activity history (created at runtime)
 └── docs/
     ├── setup.md
     ├── operations.md
     └── troubleshooting.md
 ```
 
-Source code, course configuration, runtime state, and documentation are kept separately. The application does not currently write a log file.
+Source code, course configuration, runtime data, and documentation are kept separately. The automated checker creates `data/` if needed and appends operational history to `data/checker.log` using Python's built-in `logging` module. The directory must be writable.
 
 ## Local Python Environment
 
@@ -84,12 +85,15 @@ Malformed enrollment data or a missing CRN produces an error rather than silentl
 
 ## Course Configuration
 
-Edit `courses.json` in the project root. CRNs are string keys, and values are human-readable course labels:
+Edit `courses.json` in the project root. Set the term and list courses under `courses`. CRNs are string keys, and values are human-readable course labels:
 
 ```json
 {
-  "94243": "IT 101-001",
-  "94244": "IT 101-003"
+  "term": "202690",
+  "courses": {
+    "94243": "IT 101-001",
+    "94244": "IT 101-003"
+  }
 }
 ```
 
@@ -103,20 +107,17 @@ For example:
 
 ```json
 {
-  "94243": "IT 101-001",
-  "91500": "CS 100-003"
+  "term": "202690",
+  "courses": {
+    "94243": "IT 101-001",
+    "91500": "CS 100-003"
+  }
 }
 ```
 
 The label itself is not checked against the course name returned by Banner.
 
-The term is currently set by the `TERM` constant in `src/checker.py`. The current value is:
-
-```text
-202690
-```
-
-Configure CRNs that belong to that term.
+Set `term` to the Banner term code as a string. Configure CRNs that belong to that term. Both checkers read this configuration; the automated checker reloads it each cycle, so changes do not require a restart.
 
 ## Persistent State
 
@@ -145,7 +146,7 @@ It repeats after a wait of 600 seconds (10 minutes) by default.
 Set `CHECK_INTERVAL` to a positive integer number of seconds to change the wait.
 Press `Ctrl+C` to stop.
 
-If `courses.json` is empty, the program prints:
+If the `courses` object is empty, the program prints:
 
 ```text
 No courses configured in courses.json.

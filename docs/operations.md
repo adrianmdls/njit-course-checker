@@ -1,95 +1,186 @@
-## Current Operation
+# Operations
 
-Run continuous monitoring from the project root:
+This document covers normal use of the Docker container.
 
-```bash
-.venv/bin/python src/checker.py
-```
+## Build the Image
 
-The checker runs immediately, then waits `CHECK_INTERVAL` seconds after each
-check finishes. The default is 600 seconds (10 minutes); the value must be a positive integer.
-For a shorter test interval, run `CHECK_INTERVAL=10 .venv/bin/python src/checker.py`.
-Press `Ctrl+C` to stop. Course configuration is reloaded each cycle. Retrieval
-failures preserve previous state and are retried on the next cycle. Successful
-results are saved in `data/state.json`, with console alerts for `CLOSED` to `OPEN`
-changes within the same term.
-
-Each cycle prints one summary before the course results: its start time,
-success or error count, and estimated next run time (completion time plus the
-configured interval). Successful checks show instructor, meeting details,
-delivery mode, credits, enrollment, seats remaining, and status.
-
-Each failed course counts as one error, including every affected course when
-a subject request fails. Failure details follow the summary; previous valid
-state is preserved. Configuration or state-file failures are also reported.
-Only a stored `CLOSED` status changing to `OPEN` prints `[NOTIFICATION]` with
-the course, CRN, and remaining seats. A first-time `OPEN` result sets a baseline.
-All output is console-only; file logging and Docker are not implemented.
-
-## Retrieval Test
-
-The current application supports a local Banner retrieval test. Run these commands from the project root after completing the setup instructions in [setup.md](setup.md):
+From the project root:
 
 ```bash
-source .venv/bin/activate
-python src/njit_scraper.py
+docker build -t njit-course-checker .
 ```
 
-The script performs one request for IT sections in term `202690`, prints a response preview, and exits. The output goes only to the console.
+## Configure Courses
 
-## Checking Another Subject
+Edit `courses.json` before starting the container.
 
-To test CS using the shared retrieval function without changing the script, run from the project root:
+```json
+{
+  "term": "202690",
+  "courses": {
+    "94243": "IT 101-001",
+    "91500": "CS 100-003"
+  }
+}
+```
+
+- `term` is the NJIT Banner term code.
+- Each key is a CRN.
+- Each value is a readable course label.
+- The first word of the label must match the Banner subject, such as `IT` or `CS`.
+
+The checker reloads this file every cycle, so course changes do not require rebuilding the image.
+
+## Create Persistent Data Storage
+
+Create the local data directory:
 
 ```bash
-python -c 'from src.njit_scraper import get_sections; sections = get_sections("CS", "202690"); print("JSON type:", type(sections).__name__); print("Response preview:", str(sections)[:2000])'
+mkdir -p data
 ```
 
-Check that the response is a list and the preview contains CS courses. An empty list does not establish that the requested subject and term contain section data.
+This directory stores:
 
-## Manual Course Lookup
+- `state.json`
+- `checker.log`
+- `notification.log`
 
-Manual checks only work for courses already listed in `courses.json`.
+Mounting the directory keeps state and logs after the container is recreated.
 
-Check by CRN:
+## Run the Container
 
 ```bash
-python src/manual_check.py 91936
+docker run -d \
+  --name njit-course-checker \
+  --restart unless-stopped \
+  -e CHECK_INTERVAL=600 \
+  -e TZ=America/New_York \
+  -v "$(pwd)/courses.json:/app/courses.json:ro" \
+  -v "$(pwd)/data:/app/data" \
+  njit-course-checker
 ```
 
-Or by the exact configured course and section label:
+The checker runs immediately when the container starts.
+
+After each cycle, it waits for `CHECK_INTERVAL` seconds before checking again. The default interval is 600 seconds.
+
+## View Container Output
+
+Follow the live console output:
 
 ```bash
-python src/manual_check.py "CS 288-005"
+docker logs -f njit-course-checker
 ```
 
-These examples require `"91936": "CS 288-005"` in `courses.json`.
-Provide exactly one argument; unconfigured CRNs or labels are rejected.
+The output shows the cycle summary, course information, errors, and opening notifications.
 
-The script retrieves the requested subject from Banner using `TERM` in
-`src/checker.py` and displays the section's CRN, enrollment, available seats,
-and status. It runs once and exits without changing `state.json` or affecting
-the automatic checker.
+Press `Ctrl+C` to stop following the logs. This does not stop the container.
 
-## Checking One Section by CRN
+## Persistent Logs
 
-After installing the updated dependencies from `requirements.txt`, run from the project root with the virtual environment active:
+Automated checker activity is stored in:
+
+```text
+data/checker.log
+```
+
+Course opening notifications are stored separately in:
+
+```text
+data/notification.log
+```
+
+A notification is created only when a previously stored `CLOSED` section changes to `OPEN`.
+
+The first successful check creates the baseline and does not generate an opening notification.
+
+## State
+
+The latest successful course state is stored in:
+
+```text
+data/state.json
+```
+
+Failed checks do not replace the previous successful state.
+
+The stored term is used with the saved course state so a status from a different term is not treated as a course availability change.
+
+## Manual Check
+
+Run a one-time check inside the running container:
 
 ```bash
-python - <<'PY'
-from pprint import pprint
-from src.njit_scraper import get_sections, parse_section
-
-sections = get_sections("IT", "202690")
-section = parse_section(sections, "94243")
-pprint(section)
-PY
+docker exec njit-course-checker python src/manual_check.py
 ```
 
-The result shows the matching section's meeting details, instructor, enrollment, seats remaining, and status. Change the subject, term, and CRN together to inspect another section. This development test prints only to the console and does not read course configuration or write state or logs.
+The manual check:
 
-## Planned Container Operation
+- checks every course in `courses.json`
+- prints the current results
+- exits after one run
+- does not change `state.json`
+- does not write to `checker.log`
+- does not write to `notification.log`
+- does not generate availability-change notifications
 
-Container support, persistent file logging, and external notifications are not
-implemented yet. Container build, startup,
-restart, and maintenance commands will be added when those features are available.
+## Change the Check Interval
+
+Recreate the container with a different `CHECK_INTERVAL`.
+
+For example, to check every 5 minutes:
+
+```bash
+docker rm -f njit-course-checker
+
+docker run -d \
+  --name njit-course-checker \
+  --restart unless-stopped \
+  -e CHECK_INTERVAL=300 \
+  -e TZ=America/New_York \
+  -v "$(pwd)/courses.json:/app/courses.json:ro" \
+  -v "$(pwd)/data:/app/data" \
+  njit-course-checker
+```
+
+`CHECK_INTERVAL` must be a positive number of seconds.
+
+## Stop and Start
+
+Stop the container:
+
+```bash
+docker stop njit-course-checker
+```
+
+Start it again:
+
+```bash
+docker start njit-course-checker
+```
+
+Restart it:
+
+```bash
+docker restart njit-course-checker
+```
+
+Because the container uses `--restart unless-stopped`, Docker will restart it automatically after a Docker or host restart unless it was manually stopped.
+
+## Rebuild After Code Changes
+
+Rebuild the image:
+
+```bash
+docker build -t njit-course-checker .
+```
+
+Then recreate the container:
+
+```bash
+docker rm -f njit-course-checker
+```
+
+Run it again using the normal `docker run` command above.
+
+The mounted `data/` directory keeps the existing state and logs.
