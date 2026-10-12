@@ -3,7 +3,6 @@ import logging
 import os
 import time
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import requests
@@ -216,7 +215,7 @@ def main():
     print(f"Checking courses every {interval} seconds. Press Ctrl+C to stop.")
     try:
         while True:
-            started = datetime.now(ZoneInfo("America/New_York"))
+            started = datetime.now()
             logger.info("Check cycle started")
             results, errors = check_once()
             if errors:
