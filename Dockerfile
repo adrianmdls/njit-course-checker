@@ -19,6 +19,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy the application source code
 COPY src/ ./src/
 
+# Copy manual_check script and make it executable
+COPY manual_check /usr/local/bin/manual_check
+RUN chmod +x /usr/local/bin/manual_check
+
 # Set default check interval to 10 minutes
 ENV CHECK_INTERVAL=600
 
