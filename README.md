@@ -4,7 +4,7 @@ A Python application for monitoring NJIT course availability.
 
 The checker periodically checks configured course sections, tracks their last known availability, and notifies when a section changes from `CLOSED` to `OPEN`.
 
-This project is being developed for IT 610. Local python implementation complete, next step is Docker packaging.
+This project is being developed for IT 610. Local python implementation complete, currently working on Docker packaging.
 
 ## Project Structure
 
@@ -61,5 +61,5 @@ Planned container behavior:
 
 ## Documentation
 
-- [Setup](docs/setup.md): local setup, configuration, state, logs, and application implementation.
-- [Operations](docs/operations.md): Docker container setup, configuration, and usage.
+- [Development](docs/development.md): application design, implementation process, local development environment, and technical decisions.
+- [Operations](docs/operations.md): Docker container deployment, configuration, and usage.
