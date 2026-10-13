@@ -136,7 +136,7 @@ docker rm -f njit-course-checker
 docker run -d \
   --name njit-course-checker \
   --restart unless-stopped \
-  -e CHECK_INTERVAL=300 \
+  -e CHECK_INTERVAL=600 \
   -e TZ=America/New_York \
   -v "$(pwd)/courses.json:/app/courses.json:ro" \
   -v "$(pwd)/data:/app/data" \
