@@ -1,163 +1,158 @@
-# Setup
+# Development
 
-## Initial Project Structure
+This document gives a short overview of how I built the NJIT Course Availability Checker and the main decisions I made during development.
+
+## Project Structure
 
 ```text
 njit-course-checker/
 ├── README.md
-├── Dockerfile              # Empty placeholder
+├── Dockerfile
+├── compose.yaml
+├── manual_check
 ├── requirements.txt
 ├── courses.json
 ├── src/
-│   ├── checker.py          # Continuous checking, state tracking, and logging
-│   ├── njit_scraper.py     # Banner retrieval and parsing
-│   └── manual_check.py     # One-time check by configured CRN or label
+│   ├── checker.py
+│   ├── manual_check.py
+│   ├── njit_scraper.py
+│   └── output.py
 ├── data/
-│   ├── state.json          # Latest successful results
-│   └── checker.log         # Automated activity history (created at runtime)
+│   ├── .gitkeep
+│   ├── state.json
+│   ├── checker.log
+│   └── notification.log
 └── docs/
-    ├── setup.md
-    ├── operations.md
-    └── troubleshooting.md
+    ├── development.md
+    └── operations.md
 ```
 
-Source code, course configuration, runtime data, and documentation are kept separately. The automated checker creates `data/` if needed and appends operational history to `data/checker.log` using Python's built-in `logging` module. The directory must be writable.
+The source code, course configuration, runtime data, and documentation are kept separate.
 
-## Local Python Environment
+Runtime files inside `data/` are ignored by Git, with `.gitkeep` used to keep the directory in the repository.
 
-Install Python 3 with `venv` and `pip` support. After cloning the repository, open a terminal in the project root.
+## Local Development
 
-Create and activate a virtual environment on macOS or Linux:
+I used Python 3 with a virtual environment.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-The `.venv` directory is excluded from version control.
-
-## Python Dependencies
-
-Install the versions listed in `requirements.txt`:
-
-```bash
 python -m pip install -r requirements.txt
 ```
 
-The direct dependencies are:
+The main external dependencies are:
 
-- `requests`: sends HTTP requests to NJIT Banner.
-- `beautifulsoup4`: parses section tables in the Banner response.
+- `requests`
+- `beautifulsoup4`
 
-`base64`, `json`, `pathlib`, and `urllib.parse` are Python standard-library modules and do not belong in `requirements.txt`.
+## Banner Scraper
 
-## Banner Data Retrieval
+`src/njit_scraper.py` handles requests to the NJIT Banner course schedule.
 
-`src/njit_scraper.py` dynamically constructs requests to the NJIT Banner section endpoint:
+The scraper retrieves section information by subject and term. Banner returns JSON containing HTML for the course section tables, which the scraper parses using BeautifulSoup.
 
-```text
-https://generalssb-prod.ec.njit.edu/BannerExtensibility/internalPb/virtualDomains.stuRegCrseSchedSections
-```
-
-The requested subject and term are encoded in the format expected by Banner. The same endpoint can retrieve different subjects, so separate hardcoded department URLs are unnecessary.
-
-The request does not require stored browser cookies or authentication credentials.
-
-Banner returns JSON containing HTML section-table data, which the application parses.
-
-## Section Parsing
-
-The parser extracts:
+It extracts:
 
 - CRN
 - Section
 - Status
-- Maximum enrollment
-- Current enrollment
+- Enrollment
 - Seats remaining
-- Days
-- Meeting time
+- Days and meeting time
 - Location
 - Instructor
 - Delivery mode
+- Credits
 
-Malformed enrollment data or a missing CRN produces an error rather than silently treating the section as closed.
+Courses with the same subject are grouped together so Banner only needs to be requested once per subject.
 
 ## Course Configuration
 
-Edit `courses.json` in the project root. Set the term and list courses under `courses`. CRNs are string keys, and values are human-readable course labels:
+Courses are configured in `courses.json`.
 
 ```json
 {
   "term": "202690",
   "courses": {
-    "94243": "IT 101-001",
-    "94244": "IT 101-003"
+    "94243": "IT 101-001"
   }
 }
 ```
 
-These entries are examples. The repository currently configures `94243` (`IT 101-001`).
+The application currently supports one term at a time.
 
-Replace the example entries with the sections you want to check.
+Observed NJIT Banner term codes used by the project are:
 
-Each label must currently begin with its Banner subject, such as `IT` or `CS`, because the checker uses the first word of the label when retrieving section data.
+| Term | Code |
+|---|---|
+| Spring 2026 | `202610` |
+| Summer 2026 | `202650` |
+| Fall 2026 | `202690` |
+| Winter 2026-2027 | `202695` |
 
-For example:
+The course label must start with the subject, such as `IT`, `CS`, or `PHIL`.
 
-```json
-{
-  "term": "202690",
-  "courses": {
-    "94243": "IT 101-001",
-    "91500": "CS 100-003"
-  }
-}
-```
+The automated checker reloads `courses.json` every cycle.
 
-The label itself is not checked against the course name returned by Banner.
+## Automated Checker
 
-Set `term` to the Banner term code as a string. Configure CRNs that belong to that term. Both checkers read this configuration; the automated checker reloads it each cycle, so changes do not require a restart.
+`src/checker.py` is the main process.
 
-## Persistent State
+Each cycle:
 
-`data/state.json` stores the latest successful result for each monitored CRN.
+1. Reloads `courses.json`.
+2. Retrieves course data from Banner.
+3. Compares results with the saved state.
+4. Logs status changes.
+5. Updates state.
+6. Prints the results.
+7. Waits before checking again.
 
-The first successful check establishes a baseline. On later runs, a section changing from `CLOSED` to `OPEN` produces a console notification.
+The default interval is 600 seconds and can be changed using `CHECK_INTERVAL`.
+
+The first successful check creates the baseline.
+
+After that, the checker detects:
+
+- `CLOSED -> OPEN`
+- `OPEN -> CLOSED`
 
 Failed checks do not overwrite the previous successful state.
 
-The checker creates the data directory and state file if needed. The directory must be writable.
+## State and Logs
 
-Local state persists between runs. Persistent Docker storage for this directory will be configured when container support is implemented.
+Runtime files are stored in `data/`.
 
-## Initial Run
+- `state.json` stores the latest successful course state.
+- `checker.log` stores automated checker activity and errors.
+- `notification.log` stores course status changes.
 
-With the virtual environment active and courses configured, run the checker from the project root:
+If the configured term changes, the saved state is reset.
+
+## Manual Checker
+
+`src/manual_check.py` performs one course check without changing state or writing logs.
+
+Inside the container it can be run with:
 
 ```bash
-python src/checker.py
+docker compose exec njit-course-checker manual_check
 ```
 
-The checker retrieves the configured sections immediately and saves successful
-state. Each cycle prints one summary with its start time, error count or success
-status, and estimated next run time, followed by detailed course results.
-It repeats after a wait of 600 seconds (10 minutes) by default.
-Set `CHECK_INTERVAL` to a positive integer number of seconds to change the wait.
-Press `Ctrl+C` to stop.
+## Docker
 
-If the `courses` object is empty, the program prints:
+The application runs in one custom Docker container based on Ubuntu 24.04.
 
-```text
-No courses configured in courses.json.
-```
+The container:
 
-See [operations](operations.md) for subsequent usage and [troubleshooting](troubleshooting.md) for common errors.
+- Runs the checker as its main process.
+- Uses a continuous `while` loop with `time.sleep()` between checks instead of cron.
+- Uses the `America/New_York` timezone.
+- Uses `unless-stopped` as the restart policy.
+- Mounts `courses.json` as read-only.
+- Mounts `data/` for persistent state and logs.
 
-## Container Setup
+Docker Compose is used to define and run the single-container deployment in one configuration file.
 
-Container support is not yet implemented.
-
-The current `Dockerfile` is an empty placeholder, so there is not yet a working image build or container startup process.
-
-Docker build instructions, runtime configuration, and persistent storage setup will be added once the container implementation is complete.
+For container commands and usage, see [Operations](operations.md).
