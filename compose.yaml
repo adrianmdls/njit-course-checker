@@ -1,0 +1,11 @@
+services:
+  njit-course-checker:
+    build: .
+    container_name: njit-course-checker
+    restart: unless-stopped
+    environment:
+      CHECK_INTERVAL: 600
+      TZ: America/New_York
+    volumes:
+      - ./courses.json:/app/courses.json:ro
+      - ./data:/app/data
