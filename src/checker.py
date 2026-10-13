@@ -28,7 +28,10 @@ def load_config():
     if (
         not isinstance(config, dict)
         or not isinstance(config.get("term"), str)
-        or not config["term"].strip()
+        or len(config["term"]) != 6
+        or not config["term"].isascii()
+        or not config["term"].isdigit()
+        or config["term"][4:] not in ("10", "50", "90", "95")
         or not isinstance(config.get("courses"), dict)
         or any(
             not isinstance(label, str) or not label.strip()
@@ -36,7 +39,8 @@ def load_config():
         )
     ):
         raise ValueError(
-            "Configuration must contain a nonempty term string "
+            "Configuration must contain a six-digit term string "
+            "with suffix 10, 50, 90, or 95 "
             "and a courses object with nonempty labels."
         )
 

@@ -133,6 +133,12 @@ Run a one-time check inside the running container:
 docker compose exec njit-course-checker manual_check
 ```
 
+Alternatively, run the same command directly with Docker:
+
+```bash
+docker exec njit-course-checker manual_check
+```
+
 The manual check:
 
 - checks every course in `courses.json`

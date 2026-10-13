@@ -2,6 +2,14 @@
 
 
 def format_term(term):
+    if (
+        not isinstance(term, str)
+        or len(term) != 6
+        or not term.isascii()
+        or not term.isdigit()
+    ):
+        return "Unknown Term"
+
     year = term[:4]
     suffix = term[4:]
 

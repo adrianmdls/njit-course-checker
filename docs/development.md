@@ -128,7 +128,7 @@ Runtime files are stored in `data/`.
 - `checker.log` stores automated checker activity and errors.
 - `notification.log` stores course status changes.
 
-If the configured term changes, the saved state is reset.
+If the configured term changes, state from the previous term is not used for availability comparisons. The new term's state is saved after a successful course check.
 
 ## Manual Checker
 
