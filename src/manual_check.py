@@ -8,8 +8,16 @@ from output import print_results
 
 def main():
     started = datetime.now()
-    results, errors = check_once(persist_state=False)
-    print_results(started, results, errors)
+
+    results, errors, term = check_once(persist_state=False)
+
+    print_results(
+        started,
+        results,
+        errors,
+        term,
+    )
+
     return 1 if errors else 0
 
 

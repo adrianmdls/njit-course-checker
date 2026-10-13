@@ -1,14 +1,6 @@
 # Operations
 
-This document covers normal use of the Docker container.
-
-## Build the Image
-
-From the project root:
-
-```bash
-docker build -t njit-course-checker .
-```
+This document covers normal use of the Dockerized NJIT Course Availability Checker.
 
 ## Configure Courses
 
@@ -18,8 +10,8 @@ Edit `courses.json` before starting the container.
 {
   "term": "202690",
   "courses": {
-    "94243": "IT 101-001",
-    "91500": "CS 100-003"
+    "94353": "IT 610-101",
+    "91923": "CS 288-005"
   }
 }
 ```
@@ -31,34 +23,58 @@ Edit `courses.json` before starting the container.
 
 The checker reloads this file every cycle, so course changes do not require rebuilding the image.
 
-## Create Persistent Data Storage
+#### Banner Term Codes
 
-Create the local data directory:
+The NJIT Banner term codes used by this project follow this pattern: the first four digits represent the year, and the final two digits represent the term.
+
+| Code | Term |
+|---|---|
+| `10` | Spring |
+| `50` | Summer |
+| `90` | Fall |
+| `95` | Winter |
+
+Examples:
+
+- `202610` = Spring 2026
+- `202650` = Summer 2026
+- `202690` = Fall 2026
+- `202695` = Winter 2026-2027
+
+## Persistent Data
+
+Runtime data is stored in the local `data/` directory.
+
+```text
+data/
+├── state.json
+├── checker.log
+└── notification.log
+```
+
+The directory is bind-mounted into the container so state and logs remain available if the container is stopped, removed, or recreated.
+
+If the directory does not exist yet, create it with:
 
 ```bash
 mkdir -p data
 ```
 
-This directory stores:
+## Build and Start
 
-- `state.json`
-- `checker.log`
-- `notification.log`
-
-Mounting the directory keeps state and logs after the container is recreated.
-
-## Run the Container
+From the project root:
 
 ```bash
-docker run -d \
-  --name njit-course-checker \
-  --restart unless-stopped \
-  -e CHECK_INTERVAL=600 \
-  -e TZ=America/New_York \
-  -v "$(pwd)/courses.json:/app/courses.json:ro" \
-  -v "$(pwd)/data:/app/data" \
-  njit-course-checker
+docker compose up -d --build
 ```
+
+This command:
+
+- builds the custom Docker image
+- creates the container
+- starts the checker in the background
+- applies the configured restart policy
+- mounts `courses.json` and `data/`
 
 The checker runs immediately when the container starts.
 
@@ -66,33 +82,36 @@ After each cycle, it waits for `CHECK_INTERVAL` seconds before checking again. T
 
 ## View Container Output
 
-Follow the live console output:
+To follow the live console output:
 
 ```bash
-docker logs -f njit-course-checker
+docker compose logs -f
 ```
 
-The output shows the cycle summary, course information, errors, and opening notifications.
+The output shows the cycle summary, course information, errors, and status-change events.
 
 Press `Ctrl+C` to stop following the logs. This does not stop the container.
 
 ## Persistent Logs
 
-Automated checker activity is stored in:
+Automated checker activity and errors are stored in:
 
 ```text
 data/checker.log
 ```
 
-Course opening notifications are stored separately in:
+Course status-change events are stored separately in:
 
 ```text
 data/notification.log
 ```
 
-A notification is created only when a previously stored `CLOSED` section changes to `OPEN`.
+The checker records both:
 
-The first successful check creates the baseline and does not generate an opening notification.
+- `CLOSED → OPEN`
+- `OPEN → CLOSED`
+
+The first successful check establishes the baseline and does not create a status-change event.
 
 ## State
 
@@ -102,16 +121,22 @@ The latest successful course state is stored in:
 data/state.json
 ```
 
-Failed checks do not replace the previous successful state.
+Failed checks do not overwrite the previous successful state.
 
-The stored term is used with the saved course state so a status from a different term is not treated as a course availability change.
+If the configured term changes, state from the previous term is not used for availability comparisons. The new term's state is saved after a successful course check.
 
 ## Manual Check
 
 Run a one-time check inside the running container:
 
 ```bash
-docker exec njit-course-checker python src/manual_check.py
+docker compose exec njit-course-checker manual_check
+```
+
+Alternatively, run the same command directly with Docker:
+
+```bash
+docker exec njit-course-checker manual_check
 ```
 
 The manual check:
@@ -119,68 +144,85 @@ The manual check:
 - checks every course in `courses.json`
 - prints the current results
 - exits after one run
-- does not change `state.json`
+- does not modify `state.json`
 - does not write to `checker.log`
 - does not write to `notification.log`
-- does not generate availability-change notifications
+- does not create availability-change events
 
 ## Change the Check Interval
 
-Recreate the container with a different `CHECK_INTERVAL`.
+The check interval is configured in `compose.yaml`.
 
-For example, to check every 5 minutes:
+For example:
 
-```bash
-docker rm -f njit-course-checker
-
-docker run -d \
-  --name njit-course-checker \
-  --restart unless-stopped \
-  -e CHECK_INTERVAL=300 \
-  -e TZ=America/New_York \
-  -v "$(pwd)/courses.json:/app/courses.json:ro" \
-  -v "$(pwd)/data:/app/data" \
-  njit-course-checker
+```yaml
+environment:
+  CHECK_INTERVAL: 300
+  TZ: America/New_York
 ```
 
-`CHECK_INTERVAL` must be a positive number of seconds.
+`CHECK_INTERVAL` must be a positive integer representing seconds.
+
+Examples:
+
+- `300` = 5 minutes
+- `600` = 10 minutes
+- `1800` = 30 minutes
+
+After changing `compose.yaml`, recreate the container:
+
+```bash
+docker compose up -d
+```
+
+Docker Compose will apply the updated configuration.
 
 ## Stop and Start
 
-Stop the container:
+Stop the container without removing it:
 
 ```bash
-docker stop njit-course-checker
+docker compose stop
 ```
 
 Start it again:
 
 ```bash
-docker start njit-course-checker
+docker compose start
 ```
 
 Restart it:
 
 ```bash
-docker restart njit-course-checker
+docker compose restart
 ```
 
-Because the container uses `--restart unless-stopped`, Docker will restart it automatically after a Docker or host restart unless it was manually stopped.
+Because the container uses `restart: unless-stopped`, Docker will restart it after a Docker or host restart unless it was manually stopped.
+
+## Remove the Container
+
+Stop and remove the Compose-managed container:
+
+```bash
+docker compose down
+```
+
+The local `data/` directory is not removed, so saved state and logs remain available.
 
 ## Rebuild After Code Changes
 
-Rebuild the image:
+After modifying application code or the Dockerfile, rebuild and recreate the container:
 
 ```bash
-docker build -t njit-course-checker .
+docker compose up -d --build
 ```
 
-Then recreate the container:
+The mounted `data/` directory preserves the existing state and logs.
+
+## Check Container Status
+
+View the current Compose service status:
 
 ```bash
-docker rm -f njit-course-checker
+docker compose ps
 ```
-
-Run it again using the normal `docker run` command above.
-
-The mounted `data/` directory keeps the existing state and logs.

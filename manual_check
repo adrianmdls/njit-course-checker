@@ -1,0 +1,2 @@
+#!/bin/sh
+python /app/src/manual_check.py
