@@ -157,12 +157,16 @@ def check_once(persist_state=True):
                     previous.get("status") == "CLOSED"
                     and section["status"] == "OPEN"
                 )
+                became_closed = (
+                    previous.get("status") == "OPEN"
+                    and section["status"] == "CLOSED"
+                )
 
                 result = format_course(
                     label,
                     crn,
                     section,
-                    notification=became_open,
+                    notification=became_open or became_closed,
                 )
 
             except (ValueError, KeyError, TypeError) as error:
@@ -193,11 +197,12 @@ def check_once(persist_state=True):
                     section["seats_remaining"],
                 )
 
-            if persist_state and became_open:
+            if persist_state and (became_open or became_closed):
                 notification_logger.info(
-                    "%s | CRN %s | OPENED | %s seat%s remaining",
+                    "%s | CRN %s | %s | %s seat%s remaining",
                     label,
                     crn,
+                    "OPENED" if became_open else "CLOSED",
                     section["seats_remaining"],
                     "" if section["seats_remaining"] == 1 else "s",
                 )

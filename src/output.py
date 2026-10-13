@@ -40,7 +40,7 @@ def format_course(label, crn, section, notification=False):
 
     if notification:
         result += (
-            f"\n[NOTIFICATION]\n{label}, CRN: {crn} is now OPEN.\n"
+            f"\n[NOTIFICATION]\n{label}, CRN: {crn} is now {section['status']}.\n"
             f"Seats Remaining: {section['seats_remaining']}\n"
         )
 
