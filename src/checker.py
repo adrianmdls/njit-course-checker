@@ -7,6 +7,8 @@ from pathlib import Path
 
 import requests
 
+from discord_notify import send_discord_notification
+
 from njit_scraper import get_sections, parse_section
 from output import format_course, print_results
 
@@ -202,14 +204,18 @@ def check_once(persist_state=True):
                 )
 
             if persist_state and (became_open or became_closed):
-                notification_logger.info(
-                    "%s | CRN %s | %s | %s seat%s remaining",
-                    label,
-                    crn,
-                    "OPENED" if became_open else "CLOSED",
-                    section["seats_remaining"],
-                    "" if section["seats_remaining"] == 1 else "s",
+                status = "OPENED" if became_open else "CLOSED"
+                seats = section["seats_remaining"]
+                seat_word = "seat" if seats == 1 else "seats"
+
+                message = (
+                    f"{label} | CRN {crn} | {status} | "
+                    f"{seats} {seat_word} remaining"
                 )
+
+                notification_logger.info(message)
+                send_discord_notification(message)
+
 
             results.append(result)
 
