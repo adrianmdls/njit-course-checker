@@ -41,6 +41,34 @@ Examples:
 - `202690` = Fall 2026
 - `202695` = Winter 2026-2027
 
+## Configure Environment Variables
+
+Runtime settings are configured using a `.env` file in the project root.
+
+Copy the example configuration:
+
+```bash
+cp .env.example .env
+```
+
+The file contains:
+
+```dotenv
+CHECK_INTERVAL=600
+DISCORD_WEBHOOK_URL=
+```
+
+| Variable | Description | Default |
+|---|---|---|
+| `CHECK_INTERVAL` | Seconds between automated checks | `600` |
+| `DISCORD_WEBHOOK_URL` | Optional Discord webhook URL for availability notifications | Empty (disabled) |
+
+`CHECK_INTERVAL` must be a positive integer.
+
+`DISCORD_WEBHOOK_URL` is optional. Leaving it empty disables Discord notifications without affecting the checker.
+
+The `.env` file is excluded from Git using `.gitignore` to prevent accidentally committing the webhook URL.
+
 ## Persistent Data
 
 Runtime data is stored in the local `data/` directory.
@@ -75,6 +103,7 @@ This command:
 - starts the checker in the background
 - applies the configured restart policy
 - mounts `courses.json` and `data/`
+- passes configured environment variables into the container
 
 The checker runs immediately when the container starts.
 
@@ -86,6 +115,12 @@ To follow the live console output:
 
 ```bash
 docker compose logs -f
+```
+
+Alternatively, run the same command directly with Docker:
+
+```bash
+docker logs njit-course-checker -f
 ```
 
 The output shows the cycle summary, course information, errors, and status-change events.
@@ -113,6 +148,79 @@ The checker records both:
 
 The first successful check establishes the baseline and does not create a status-change event.
 
+## Discord Webhook Notifications
+
+The checker supports optional Discord webhook notifications when a course changes availability.
+
+### Enable Discord Notifications
+
+1. Open the desired Discord server.
+2. Navigate to **Server Settings → Integrations → Webhooks**.
+3. Create a webhook and select the notification channel.
+4. Copy the generated webhook URL.
+5. Add the URL to `.env`:
+
+```dotenv
+CHECK_INTERVAL=600
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_TOKEN
+```
+
+Recreate the container to apply the updated configuration:
+
+```bash
+docker compose up -d
+```
+
+### Notification Behavior
+
+Discord notifications are sent when:
+
+- A course changes from `CLOSED → OPEN`.
+- A course changes from `OPEN → CLOSED`.
+
+Example notification:
+
+```text
+IT 610-101 | CRN 94353 | OPENED | 1 seat remaining
+```
+
+Notifications are not sent during the initial baseline check or when a course's availability status remains unchanged.
+
+Discord notifications are separate from local logging. Availability changes are recorded in `notification.log` regardless of whether Discord is enabled.
+
+If Discord is unavailable or a webhook request fails, the checker logs a warning and continues operating.
+
+### Disable Discord Notifications
+
+To disable Discord notifications, leave the webhook URL empty:
+
+```dotenv
+DISCORD_WEBHOOK_URL=
+```
+
+Then recreate the container:
+
+```bash
+docker compose up -d
+```
+
+The checker continues monitoring courses and recording status changes locally.
+
+### Test the Webhook
+
+To send a test message without waiting for a course availability change, run:
+
+```bash
+docker exec -w /app/src njit-course-checker \
+  python3 -c 'from discord_notify import send_discord_notification; print(send_discord_notification("NJIT Course Checker: Test notification"))'
+```
+
+The command returns `True` if the webhook request succeeds or `False` if the webhook is disabled or the request fails.
+
+The `/app/src` path assumes the container stores Python source files there. Adjust it if the Dockerfile uses a different directory.
+
+The test does not modify `state.json` or create an availability-change event.
+
 ## State
 
 The latest successful course state is stored in:
@@ -130,7 +238,7 @@ If the configured term changes, state from the previous term is not used for ava
 Run a one-time check inside the running container:
 
 ```bash
-docker compose exec njit-course-checker manual_check
+docker compose exec checker manual_check
 ```
 
 Alternatively, run the same command directly with Docker:
@@ -147,18 +255,18 @@ The manual check:
 - does not modify `state.json`
 - does not write to `checker.log`
 - does not write to `notification.log`
+- does not send Discord notifications
 - does not create availability-change events
 
 ## Change the Check Interval
 
-The check interval is configured in `compose.yaml`.
+The check interval is configured using `CHECK_INTERVAL` in `.env`.
 
 For example:
 
-```yaml
-environment:
-  CHECK_INTERVAL: 300
-  TZ: America/New_York
+```dotenv
+CHECK_INTERVAL=300
+DISCORD_WEBHOOK_URL=
 ```
 
 `CHECK_INTERVAL` must be a positive integer representing seconds.
@@ -169,7 +277,7 @@ Examples:
 - `600` = 10 minutes
 - `1800` = 30 minutes
 
-After changing `compose.yaml`, recreate the container:
+After changing `.env`, recreate the container:
 
 ```bash
 docker compose up -d
