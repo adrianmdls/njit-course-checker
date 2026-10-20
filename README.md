@@ -2,22 +2,24 @@
 
 A Dockerized Python application for monitoring NJIT course availability.
 
-The checker periodically checks configured course sections, tracks their last known availability, and logs changes when a section transitions between `CLOSED` and `OPEN`.
+The checker periodically checks configured course sections, tracks their last known availability, and notifies users when a section transitions between `CLOSED` and `OPEN`.
 
 This project was developed for IT 610 and runs in a single custom Docker container built from Ubuntu 24.04.
 
 ## Project Structure
 
-```text
+```
 njit-course-checker/
 ├── README.md
 ├── Dockerfile
 ├── compose.yaml
+├── .env.example
 ├── manual_check
 ├── requirements.txt
 ├── courses.json
 ├── src/
 │   ├── checker.py
+│   ├── discord_notify.py
 │   ├── manual_check.py
 │   ├── njit_scraper.py
 │   └── output.py
@@ -31,7 +33,7 @@ njit-course-checker/
     └── operations.md
 ```
 
-Runtime files in `data/` are created as needed and are excluded from Git.
+Runtime files in `data/` are created as needed and are excluded from Git. The `.env` file is also excluded to prevent exposing webhook URLs.
 
 ## Application Behavior
 
@@ -43,11 +45,12 @@ The automated checker:
 - Tracks the last successful status and remaining seats in `data/state.json`.
 - Logs checker activity and errors to `data/checker.log`.
 - Logs availability changes (`CLOSED → OPEN` and `OPEN → CLOSED`) to `data/notification.log`.
+- Sends optional Discord webhook notifications when course availability changes.
 - Prints detailed course information and notifications to the console.
 - Waits `CHECK_INTERVAL` seconds between cycles, defaulting to 600 seconds.
 - Preserves previous successful state when a check fails.
 
-The manual checker performs a single check without modifying saved state or logs.
+The manual checker performs a single check without modifying saved state, writing logs, or sending Discord notifications.
 
 ## Docker Configuration
 
@@ -56,6 +59,7 @@ The application runs in a single custom Docker container with the following conf
 - Ubuntu 24.04 base image.
 - `America/New_York` timezone.
 - Configurable `CHECK_INTERVAL` environment variable.
+- Optional `DISCORD_WEBHOOK_URL` environment variable.
 - Read-only bind mount for `courses.json`.
 - Persistent bind mount for `data/`.
 - Docker restart policy of `unless-stopped`.
@@ -63,11 +67,30 @@ The application runs in a single custom Docker container with the following conf
 
 ## Quick Start
 
-Build and start the container using Docker Compose:
+1. Clone the repository and navigate to the project directory.
 
-```bash
-docker compose up -d --build
-```
+2. Copy the example environment configuration:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Edit `courses.json` to specify the term and courses to monitor.
+
+4. Optionally configure Discord notifications by adding a webhook URL to `.env`:
+
+   ```dotenv
+   CHECK_INTERVAL=600
+   DISCORD_WEBHOOK_URL=
+   ```
+
+   Leaving `DISCORD_WEBHOOK_URL` empty disables Discord notifications.
+
+5. Build and start the container:
+
+   ```bash
+   docker compose up -d --build
+   ```
 
 View automated checker output:
 
@@ -78,7 +101,7 @@ docker compose logs -f
 Run a manual check:
 
 ```bash
-docker compose exec njit-course-checker manual_check
+docker compose exec checker manual_check
 ```
 
 Stop and remove the container:
@@ -87,7 +110,7 @@ Stop and remove the container:
 docker compose down
 ```
 
-Configuration is managed through `compose.yaml` and `courses.json`. Runtime data is preserved in the host's `data/` directory.
+Configuration is managed through `courses.json` and environment variables passed through Docker Compose. Runtime data is preserved in the host's `data/` directory.
 
 ## Documentation
 

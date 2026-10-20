@@ -9,11 +9,13 @@ njit-course-checker/
 ├── README.md
 ├── Dockerfile
 ├── compose.yaml
+├── .env.example
 ├── manual_check
 ├── requirements.txt
 ├── courses.json
 ├── src/
 │   ├── checker.py
+│   ├── discord_notify.py
 │   ├── manual_check.py
 │   ├── njit_scraper.py
 │   └── output.py
@@ -27,9 +29,9 @@ njit-course-checker/
     └── operations.md
 ```
 
-The source code, course configuration, runtime data, and documentation are kept separate.
+The source code, course configuration, runtime data, environment settings, and documentation are kept separate.
 
-Runtime files inside `data/` are ignored by Git, with `.gitkeep` used to keep the directory in the repository.
+Runtime files inside `data/` are ignored by Git, with `.gitkeep` used to keep the directory in the repository. The `.env` file is also ignored to prevent sensitive information, such as Discord webhook URLs, from being committed.
 
 ## Local Development
 
@@ -45,6 +47,8 @@ The main external dependencies are:
 
 - `requests`
 - `beautifulsoup4`
+
+The Discord webhook integration uses `requests`, so no additional dependencies are needed.
 
 ## Banner Scraper
 
@@ -104,21 +108,51 @@ Each cycle:
 1. Reloads `courses.json`.
 2. Retrieves course data from Banner.
 3. Compares results with the saved state.
-4. Logs status changes.
+4. Logs status changes and sends Discord notifications if enabled.
 5. Updates state.
 6. Prints the results.
 7. Waits before checking again.
 
-The default interval is 600 seconds and can be changed using `CHECK_INTERVAL`.
+The default interval is 600 seconds and can be changed using the `CHECK_INTERVAL` environment variable.
 
 The first successful check creates the baseline.
 
 After that, the checker detects:
 
-- `CLOSED -> OPEN`
-- `OPEN -> CLOSED`
+- `CLOSED → OPEN`
+- `OPEN → CLOSED`
 
-Failed checks do not overwrite the previous successful state.
+Failed course checks do not overwrite the previous successful state.
+
+## Environment Variables
+
+Runtime configuration is handled using environment variables passed through Docker Compose.
+
+The `.env.example` file provides the default configuration:
+
+```dotenv
+CHECK_INTERVAL=600
+DISCORD_WEBHOOK_URL=
+```
+
+- `CHECK_INTERVAL` determines the time between automated checks in seconds.
+- `DISCORD_WEBHOOK_URL` optionally enables Discord notifications.
+
+The actual `.env` file is excluded from Git to avoid exposing webhook URLs.
+
+## Discord Webhook Notifications
+
+`src/discord_notify.py` handles sending notifications to Discord.
+
+When a course changes from `CLOSED → OPEN` or `OPEN → CLOSED`, the checker records the event in `notification.log` and calls `send_discord_notification()`.
+
+The function uses `requests.post()` to send the notification to the configured Discord webhook URL.
+
+Discord notifications are optional. If `DISCORD_WEBHOOK_URL` is empty or not defined, the function skips sending the notification.
+
+A request timeout and exception handling prevent Discord connection failures from stopping the checker.
+
+I kept the Discord notification logic in a separate module to avoid adding unnecessary complexity to `checker.py` and to make it easier to reuse in the final multi-container version.
 
 ## State and Logs
 
@@ -128,17 +162,21 @@ Runtime files are stored in `data/`.
 - `checker.log` stores automated checker activity and errors.
 - `notification.log` stores course status changes.
 
+Discord notifications are separate from local logging. Status changes are still recorded in `notification.log` even if Discord is disabled or the webhook request fails.
+
 If the configured term changes, state from the previous term is not used for availability comparisons. The new term's state is saved after a successful course check.
 
 ## Manual Checker
 
-`src/manual_check.py` performs one course check without changing state or writing logs.
+`src/manual_check.py` performs one course check without changing state, writing logs, or sending Discord notifications.
 
 Inside the container it can be run with:
 
 ```bash
-docker compose exec njit-course-checker manual_check
+docker compose exec checker manual_check
 ```
+
+The command assumes the Docker Compose service is named `checker`.
 
 ## Docker
 
@@ -152,6 +190,7 @@ The container:
 - Uses `unless-stopped` as the restart policy.
 - Mounts `courses.json` as read-only.
 - Mounts `data/` for persistent state and logs.
+- Receives environment variables through Docker Compose.
 
 Docker Compose is used to define and run the single-container deployment in one configuration file.
 
