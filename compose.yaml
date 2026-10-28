@@ -12,3 +12,28 @@ services:
     volumes:
       - ./courses.json:/app/courses.json:ro
       - ./data:/app/data
+
+  db:
+    image: mariadb:lts
+    container_name: njit-db
+    restart: unless-stopped
+
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: njit_course_checker
+      MARIADB_USER: njit_app
+      MARIADB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      TZ: America/New_York
+
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  mariadb_data:
