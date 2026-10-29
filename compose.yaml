@@ -4,10 +4,20 @@ services:
     container_name: njit-course-checker
     restart: unless-stopped
 
+    depends_on:
+      db:
+        condition: service_healthy
+
     environment:
       CHECK_INTERVAL: ${CHECK_INTERVAL:-600}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       TZ: America/New_York
+
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: njit_course_checker
+      DB_USER: njit_app
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
 
     volumes:
       - ./courses.json:/app/courses.json:ro

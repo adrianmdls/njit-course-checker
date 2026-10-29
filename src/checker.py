@@ -2,8 +2,10 @@ import json
 import logging
 import os
 import time
+import pymysql
 from datetime import datetime, timedelta
 from pathlib import Path
+from database import save_section
 
 import requests
 
@@ -202,6 +204,23 @@ def check_once(persist_state=True):
                     section["max_enrollment"],
                     section["seats_remaining"],
                 )
+                
+            if persist_state:
+                try:
+                    save_section(subject, term, section)
+
+                except pymysql.MySQLError as error:
+                    errors += 1
+                    logger.error(
+                        "%s | CRN %s | Could not save section to MariaDB: %s",
+                        label,
+                        crn,
+                        error,
+                    )
+                    results.append(
+                        f"ERROR: Could not save CRN {crn} to MariaDB: {error}"
+                    )
+
 
             if persist_state and (became_open or became_closed):
                 status = "OPENED" if became_open else "CLOSED"
