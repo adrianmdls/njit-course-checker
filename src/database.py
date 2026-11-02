@@ -87,18 +87,61 @@ def get_sections_to_check():
         with connection.cursor(pymysql.cursors.DictCursor) as cursor:
             cursor.execute(
                 """
-                SELECT
-                    id,
-                    subject,
-                    term,
-                    crn,
-                    section_number,
-                    status,
-                    last_checked_at
-                FROM Sections
-                ORDER BY term, subject, crn
-                """
+                    SELECT
+                        s.id,
+                        s.subject,
+                        s.term,
+                        s.crn,
+                        s.section_number,
+                        s.status,
+                        s.last_checked_at
+                    FROM Sections s
+                    WHERE s.course_id IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                        FROM Watchlists w
+                        WHERE w.section_id = s.id
+                    )
+                    ORDER BY s.term, s.subject, s.crn
+                    """
             )
+            return cursor.fetchall()
+
+    finally:
+        connection.close()
+
+
+def search_cached_courses(subject, course_number, term):
+    """Search cached course sections in MariaDB."""
+    connection = get_connection()
+
+    try:
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    c.subject,
+                    c.course_number,
+                    c.title,
+                    s.id AS section_id,
+                    s.term,
+                    s.crn,
+                    s.section_number,
+                    s.capacity,
+                    s.enrolled,
+                    s.status,
+                    s.last_checked_at
+                FROM Courses c
+                INNER JOIN Sections s
+                    ON s.course_id = c.id
+                WHERE c.subject = %s
+                  AND c.course_number = %s
+                  AND s.term = %s
+                ORDER BY s.section_number
+                """,
+                (subject.upper(), str(course_number).upper(), term),
+            )
+
             return cursor.fetchall()
 
     finally:
