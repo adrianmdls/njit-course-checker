@@ -171,3 +171,27 @@ def is_department_cache_fresh(subject, term, max_age=1800):
 
     finally:
         connection.close()
+        
+
+def get_active_departments():
+    """Retrieve departments and terms with active watchlists."""
+    connection = get_connection()
+
+    try:
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT DISTINCT
+                    s.subject,
+                    s.term
+                FROM Sections s
+                INNER JOIN Watchlists w
+                    ON w.section_id = s.id
+                ORDER BY s.term, s.subject
+                """
+            )
+
+            return cursor.fetchall()
+
+    finally:
+        connection.close()
