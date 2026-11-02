@@ -5,7 +5,7 @@ import time
 import pymysql
 from datetime import datetime, timedelta
 from pathlib import Path
-from database import save_section
+from database import get_sections_to_check, save_section
 
 import requests
 
@@ -90,171 +90,129 @@ def save_state(state):
 
 
 def check_once(persist_state=True):
-    """Check configured courses; optionally persist state and log activity."""
+    """Check sections from MariaDB and update enrollment data."""
     results = []
     errors = 0
 
+    # 1. Load monitored sections from MariaDB
     try:
-        term, courses = load_config()
-    except (OSError, ValueError) as error:
+        courses = get_sections_to_check()
+
+    except pymysql.MySQLError as error:
         if persist_state:
-            logger.error("Could not load courses.json: %s", error)
-        return [f"ERROR: Could not load courses.json: {error}"], 1, None
+            logger.error("Could not load sections: %s", error)
+
+        return [f"ERROR: Database unavailable: {error}"], 1, None
 
     if not courses:
-        if persist_state:
-            logger.info("No courses configured in courses.json.")
-        return ["No courses configured in courses.json."], 0, term
+        return ["No sections configured for monitoring."], 0, None
 
-    try:
-        state = (
-            load_state(term)
-            if persist_state
-            else {"term": term, "courses": {}}
-        )
-    except (OSError, ValueError) as error:
-        if persist_state:
-            logger.error("Could not load previous state: %s", error)
+    # 2. Group sections by term and subject
+    groups = {}
 
-        return [
-            f"ERROR: Could not load previous state: {error}"
-        ], len(courses), term
+    for course in courses:
+        key = (course["term"], course["subject"])
+        groups.setdefault(key, []).append(course)
 
-    state_updated = False
-
-    subjects = {}
-
-    for crn, label in courses.items():
-        subject = label.split()[0].upper()
-        subjects.setdefault(subject, []).append((crn, label))
-
-    for subject, configured_courses in subjects.items():
+    # 3. Retrieve Banner data for each group
+    for (term, subject), configured_courses in groups.items():
         try:
             sections = get_sections(subject, term)
 
         except (requests.RequestException, ValueError) as error:
             errors += len(configured_courses)
 
-            for crn, label in configured_courses:
-                if persist_state:
-                    logger.error(
-                        "%s | CRN %s | Could not retrieve %s course data: %s",
-                        label,
-                        crn,
-                        subject,
-                        error,
-                    )
+            if persist_state:
+                logger.error(
+                    "Could not retrieve %s for term %s: %s",
+                    subject, term, error
+                )
 
+            for course in configured_courses:
                 results.append(
-                    "=" * 40
-                    + f"\n{label}, CRN: {crn}\n"
-                    + f"ERROR: Could not retrieve {subject} course data: {error}\n"
+                    f"ERROR: CRN {course['crn']}: {error}"
                 )
 
             continue
 
-        for crn, label in configured_courses:
-            heading = "=" * 40 + f"\n{label}, CRN: {crn}\n"
+        # 4. Process each section in the group
+        for course in configured_courses:
+            crn = course["crn"]
+            section_number = course["section_number"] or "Unknown"
+            label = f"{subject} Section {section_number}"
 
             try:
                 section = parse_section(sections, crn)
 
-                previous = state["courses"].get(crn, {})
+                previous_status = course["status"]
+                current_status = section["status"]
 
-                became_open = (
-                    previous.get("status") == "CLOSED"
-                    and section["status"] == "OPEN"
+                status_changed = (
+                    previous_status in ("OPEN", "CLOSED")
+                    and previous_status != current_status
                 )
-                became_closed = (
-                    previous.get("status") == "OPEN"
-                    and section["status"] == "CLOSED"
-                )
+
+                # 5. Persist successful checks
+                if persist_state:
+                    save_section(subject, term, section)
 
                 result = format_course(
                     label,
                     crn,
                     section,
-                    notification=became_open or became_closed,
+                    notification=persist_state and status_changed,
                 )
 
-            except (ValueError, KeyError, TypeError) as error:
+                # 6. Preserve existing Discord notifications
+                if persist_state and status_changed:
+                    message = (
+                        f"{label} | Term {term} | "
+                        f"CRN {crn} | {current_status} | "
+                        f"{section['seats_remaining']} seats remaining"
+                    )
+
+                    notification_logger.info(message)
+                    send_discord_notification(message)
+
+                results.append(result)
+
+                if persist_state:
+                    logger.info(
+                        "%s | Term %s | CRN %s | %s | %s/%s enrolled",
+                        label,
+                        term,
+                        crn,
+                        current_status,
+                        section["current_enrollment"],
+                        section["max_enrollment"],
+                    )
+
+            except (
+                ValueError,
+                KeyError,
+                TypeError,
+                pymysql.MySQLError,
+            ) as error:
                 errors += 1
 
                 if persist_state:
                     logger.error(
-                        "%s | CRN %s | Could not check course: %s",
-                        label,
-                        crn,
-                        error,
+                        "%s | Term %s | CRN %s | Check failed: %s",
+                        label, term, crn, error
                     )
 
                 results.append(
-                    heading + f"ERROR: Could not check course: {error}\n"
+                    f"ERROR: {label}, CRN {crn}: {error}"
                 )
 
-                continue
+    # 7. Return term for console output
+    terms = {course["term"] for course in courses}
 
-            if persist_state:
-                logger.info(
-                    "%s | CRN %s | %s | %s/%s enrolled | %s seats remaining",
-                    label,
-                    crn,
-                    section["status"],
-                    section["current_enrollment"],
-                    section["max_enrollment"],
-                    section["seats_remaining"],
-                )
-                
-            if persist_state:
-                try:
-                    save_section(subject, term, section)
+    display_term = (
+        next(iter(terms)) if len(terms) == 1 else None
+    )
 
-                except pymysql.MySQLError as error:
-                    errors += 1
-                    logger.error(
-                        "%s | CRN %s | Could not save section to MariaDB: %s",
-                        label,
-                        crn,
-                        error,
-                    )
-                    results.append(
-                        f"ERROR: Could not save CRN {crn} to MariaDB: {error}"
-                    )
-
-
-            if persist_state and (became_open or became_closed):
-                status = "OPENED" if became_open else "CLOSED"
-                seats = section["seats_remaining"]
-                seat_word = "seat" if seats == 1 else "seats"
-
-                message = (
-                    f"{label} | CRN {crn} | {status} | "
-                    f"{seats} {seat_word} remaining"
-                )
-
-                notification_logger.info(message)
-                send_discord_notification(message)
-
-
-            results.append(result)
-
-            state["courses"][crn] = {
-                "status": section["status"],
-                "seats_remaining": section["seats_remaining"],
-            }
-
-            state_updated = True
-
-    if persist_state and state_updated:
-        try:
-            save_state(state)
-
-        except OSError as error:
-            errors += 1
-            logger.error("Could not save state: %s", error)
-            results.append(f"ERROR: Could not save state: {error}")
-
-    return results, errors, term
+    return results, errors, display_term
 
 
 def setup_logging():

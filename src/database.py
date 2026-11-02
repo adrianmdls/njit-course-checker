@@ -92,12 +92,13 @@ def get_sections_to_check():
                     subject,
                     term,
                     crn,
-                    section_number
+                    section_number,
+                    status,
+                    last_checked_at
                 FROM Sections
                 ORDER BY term, subject, crn
                 """
             )
-
             return cursor.fetchall()
 
     finally:

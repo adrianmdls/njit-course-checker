@@ -76,7 +76,12 @@ def print_results(started, results, errors, term, next_run=None):
     print()
 
     print("=" * 40)
-    print(f"Term: {format_term(term)} ({term})")
+    
+    if term is None:
+        print("Term: Multiple terms / Not specified")
+    else:
+        print(f"Term: {format_term(term)} ({term})")
+        
     print("=" * 40)
 
     print("\n".join(results))

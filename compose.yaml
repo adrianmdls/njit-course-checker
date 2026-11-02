@@ -20,7 +20,6 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
 
     volumes:
-      - ./courses.json:/app/courses.json:ro
       - ./data:/app/data
 
   db:
