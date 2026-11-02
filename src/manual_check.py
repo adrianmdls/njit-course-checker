@@ -2,8 +2,8 @@
 
 from datetime import datetime
 
-from checker import check_once
-from output import print_results
+from src.checker import check_once
+from src.output import print_results
 
 
 def main():

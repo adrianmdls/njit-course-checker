@@ -27,4 +27,4 @@ RUN chmod +x /usr/local/bin/manual_check
 ENV CHECK_INTERVAL=600
 
 # Start the automated checker
-CMD ["python", "-u", "src/checker.py"]
+CMD ["python", "-u", "-m", "src.checker"]

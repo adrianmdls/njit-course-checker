@@ -5,14 +5,15 @@ import time
 import pymysql
 from datetime import datetime, timedelta
 from pathlib import Path
-from database import get_sections_to_check, save_section
+from src.database import get_sections_to_check, save_section
+from src.department_sync import sync_department
 
 import requests
 
-from discord_notify import send_discord_notification
+from src.discord_notify import send_discord_notification
 
-from njit_scraper import get_sections, parse_section
-from output import format_course, print_results
+from src.njit_scraper import get_sections, parse_section
+from src.output import format_course, print_results
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
