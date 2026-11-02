@@ -149,6 +149,7 @@ def check_once(persist_state=True):
 
                 status_changed = (
                     previous_status in ("OPEN", "CLOSED")
+                    and current_status in ("OPEN", "CLOSED")
                     and previous_status != current_status
                 )
 

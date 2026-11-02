@@ -53,7 +53,7 @@ def parse_section(sections, crn):
 
             status = cells[5].upper()
 
-            if status not in ("OPEN", "CLOSED"):
+            if status not in ("OPEN", "CLOSED", "CANCELLED"):
                 raise ValueError(
                     f"Unexpected status for CRN {crn}: {cells[5]}"
                 )
@@ -120,7 +120,7 @@ def parse_all_sections(data):
 
                 status = cells[5].upper()
 
-                if status not in ("OPEN", "CLOSED"):
+                if status not in ("OPEN", "CLOSED", "CANCELLED"):
                     raise ValueError(
                         f"Unexpected status for CRN {cells[1]}"
                     )
