@@ -86,3 +86,70 @@ def parse_section(sections, crn):
     raise ValueError(
         f"CRN {crn} was not found in the retrieved sections"
     )
+    
+    
+def parse_all_sections(data):
+    """Parse all courses and sections from a Banner response."""
+    results = []
+
+    for item in data:
+        soup = BeautifulSoup(item["SECTIONS_TABLE"], "html.parser")
+
+        for heading in soup.select("h4[id]"):
+            course = heading["id"].strip()
+            title = heading.get_text(" ", strip=True)
+
+            table = heading.find_next_sibling("table")
+
+            if table is None or "sections-table" not in table.get("class", []):
+                continue
+
+            for row in table.select("tr"):
+                cells = [
+                    cell.get_text(" ", strip=True)
+                    for cell in row.find_all("td", recursive=False)
+                ]
+
+                if not cells:
+                    continue
+
+                if len(cells) != 13:
+                    raise ValueError(
+                        f"Unexpected section columns for {course}"
+                    )
+
+                status = cells[5].upper()
+
+                if status not in ("OPEN", "CLOSED"):
+                    raise ValueError(
+                        f"Unexpected status for CRN {cells[1]}"
+                    )
+
+                try:
+                    max_enrollment = int(cells[6])
+                    current_enrollment = int(cells[7])
+                except ValueError as error:
+                    raise ValueError(
+                        f"Invalid enrollment for CRN {cells[1]}"
+                    ) from error
+
+                results.append({
+                    "course": course,
+                    "title": title,
+                    "crn": cells[1],
+                    "section": cells[0],
+                    "days": cells[2],
+                    "meeting_time": cells[3],
+                    "location": cells[4],
+                    "status": status,
+                    "max_enrollment": max_enrollment,
+                    "current_enrollment": current_enrollment,
+                    "seats_remaining": max_enrollment - current_enrollment,
+                    "instructor": cells[8],
+                    "delivery_mode": cells[9],
+                    "credits": cells[10],
+                    "info": cells[11],
+                    "comments": cells[12],
+                })
+
+    return results
