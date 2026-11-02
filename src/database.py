@@ -146,3 +146,28 @@ def search_cached_courses(subject, course_number, term):
 
     finally:
         connection.close()
+        
+        
+def is_department_cache_fresh(subject, term, max_age=1800):
+    """Check whether a department cache is still fresh."""
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    last_synced_at >=
+                    NOW() - INTERVAL %s SECOND
+                FROM DepartmentSyncs
+                WHERE subject = %s AND term = %s
+                """,
+                (max_age, subject.strip().upper(), str(term)),
+            )
+
+            result = cursor.fetchone()
+
+            return bool(result and result[0])
+
+    finally:
+        connection.close()
