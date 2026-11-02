@@ -31,3 +31,6 @@ data/*
 .vscode/
 .idea/
 tempCodeRunnerFile.py
+
+# Backup Files
+backups/
