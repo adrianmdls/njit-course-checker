@@ -3,6 +3,8 @@ import { useState } from 'react'
 import { Bookmark, Search, Bell, Trash2 } from 'lucide-react'
 import { mockCourses } from '../data/mockCourses'
 
+import SearchCourses from '../components/SearchCourses'
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('watchlist')
   const [courses, setCourses] = useState(mockCourses)
@@ -22,6 +24,23 @@ export default function Dashboard() {
       current.filter((course) => course.crn !== crn)
     )
   }
+
+  function addCourse(section) {
+  setCourses((current) => {
+    if (current.some((course) => course.crn === section.crn)) {
+      return current
+    }
+
+    return [
+      ...current,
+      {
+        ...section,
+        checked: 'Not checked yet',
+        notify: false,
+      },
+    ]
+  })
+}
 
   return (
     <div className="mx-auto w-full max-w-[1700px] px-4 py-10 md:px-12">
@@ -154,13 +173,7 @@ export default function Dashboard() {
             )}
           </div>
         ) : (
-          <div className="py-16 text-center">
-            <Search size={40} className="mx-auto mb-4 text-slate-400" />
-            <h2 className="text-2xl font-semibold">Search Courses</h2>
-            <p className="mt-2 text-slate-500">
-              Course search interface coming soon.
-            </p>
-          </div>
+            <SearchCourses courses={courses} onAdd={addCourse} />
         )}
       </div>
     </div>
