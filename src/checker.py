@@ -137,6 +137,8 @@ def check_once(persist_state=True):
             continue
 
         # 4. Process each section in the group
+        group_errors = 0
+
         for course in configured_courses:
             crn = course["crn"]
             section_number = course["section_number"] or "Unknown"
@@ -196,6 +198,7 @@ def check_once(persist_state=True):
                 pymysql.MySQLError,
             ) as error:
                 errors += 1
+                group_errors += 1
 
                 if persist_state:
                     logger.error(
@@ -205,6 +208,33 @@ def check_once(persist_state=True):
 
                 results.append(
                     f"ERROR: {label}, CRN {crn}: {error}"
+                )
+
+        # Synchronize all cached sections using the same Banner response.
+        if persist_state and group_errors == 0:
+            try:
+                sync_department(subject, term, data=sections)
+
+                logger.info(
+                    "Synchronized department %s for term %s",
+                    subject,
+                    term,
+                )
+
+            except (
+                requests.RequestException,
+                ValueError,
+                KeyError,
+                TypeError,
+                pymysql.MySQLError,
+            ) as error:
+                errors += 1
+
+                logger.error(
+                    "Department sync failed for %s %s: %s",
+                    subject,
+                    term,
+                    error,
                 )
 
     # 7. Return term for console output
