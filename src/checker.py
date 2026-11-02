@@ -3,10 +3,12 @@ import logging
 import os
 import time
 import pymysql
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
 from src.database import get_sections_to_check, save_section
 from src.department_sync import sync_department
+from src.sync_lock import department_lock
 
 import requests
 
@@ -118,124 +120,154 @@ def check_once(persist_state=True):
     # 3. Retrieve Banner data for each group
     for (term, subject), configured_courses in groups.items():
         try:
-            sections = get_sections(subject, term)
+            with (
+                department_lock(subject, term, timeout=30)
+                if persist_state else nullcontext()
+            ):
+                if persist_state:
+                    # Reload monitoring membership and statuses after waiting.
+                    configured_courses = [
+                        course for course in get_sections_to_check()
+                        if (course["term"], course["subject"]) == (term, subject)
+                    ]
 
-        except (requests.RequestException, ValueError) as error:
-            errors += len(configured_courses)
+                    if not configured_courses:
+                        continue
+
+                try:
+                    sections = get_sections(subject, term)
+
+                except (requests.RequestException, ValueError) as error:
+                    errors += len(configured_courses)
+
+                    if persist_state:
+                        logger.error(
+                            "Could not retrieve %s for term %s: %s",
+                            subject, term, error
+                        )
+
+                    for course in configured_courses:
+                        results.append(
+                            f"ERROR: CRN {course['crn']}: {error}"
+                        )
+
+                    continue
+
+                # 4. Process each section in the group
+                group_errors = 0
+
+                for course in configured_courses:
+                    crn = course["crn"]
+                    section_number = course["section_number"] or "Unknown"
+                    label = f"{subject} Section {section_number}"
+
+                    try:
+                        section = parse_section(sections, crn)
+
+                        previous_status = course["status"]
+                        current_status = section["status"]
+
+                        status_changed = (
+                            previous_status in ("OPEN", "CLOSED")
+                            and current_status in ("OPEN", "CLOSED")
+                            and previous_status != current_status
+                        )
+
+                        # 5. Persist successful checks
+                        if persist_state:
+                            save_section(subject, term, section)
+
+                        result = format_course(
+                            label,
+                            crn,
+                            section,
+                            notification=persist_state and status_changed,
+                        )
+
+                        # 6. Preserve existing Discord notifications
+                        if persist_state and status_changed:
+                            message = (
+                                f"{label} | Term {term} | "
+                                f"CRN {crn} | {current_status} | "
+                                f"{section['seats_remaining']} seats remaining"
+                            )
+
+                            notification_logger.info(message)
+                            send_discord_notification(message)
+
+                        results.append(result)
+
+                        if persist_state:
+                            logger.info(
+                                "%s | Term %s | CRN %s | %s | %s/%s enrolled",
+                                label,
+                                term,
+                                crn,
+                                current_status,
+                                section["current_enrollment"],
+                                section["max_enrollment"],
+                            )
+
+                    except (
+                        ValueError,
+                        KeyError,
+                        TypeError,
+                        pymysql.MySQLError,
+                    ) as error:
+                        errors += 1
+                        group_errors += 1
+
+                        if persist_state:
+                            logger.error(
+                                "%s | Term %s | CRN %s | Check failed: %s",
+                                label, term, crn, error
+                            )
+
+                        results.append(
+                            f"ERROR: {label}, CRN {crn}: {error}"
+                        )
+
+                # Synchronize all cached sections using the same Banner response.
+                if persist_state and group_errors == 0:
+                    try:
+                        sync_department(subject, term, data=sections)
+
+                        logger.info(
+                            "Synchronized department %s for term %s",
+                            subject,
+                            term,
+                        )
+
+                    except (
+                        requests.RequestException,
+                        ValueError,
+                        KeyError,
+                        TypeError,
+                        pymysql.MySQLError,
+                    ) as error:
+                        errors += 1
+
+                        logger.error(
+                            "Department sync failed for %s %s: %s",
+                            subject,
+                            term,
+                            error,
+                        )
+
+        except (TimeoutError, pymysql.MySQLError) as error:
+            errors += 1
 
             if persist_state:
                 logger.error(
-                    "Could not retrieve %s for term %s: %s",
-                    subject, term, error
-                )
-
-            for course in configured_courses:
-                results.append(
-                    f"ERROR: CRN {course['crn']}: {error}"
-                )
-
-            continue
-
-        # 4. Process each section in the group
-        group_errors = 0
-
-        for course in configured_courses:
-            crn = course["crn"]
-            section_number = course["section_number"] or "Unknown"
-            label = f"{subject} Section {section_number}"
-
-            try:
-                section = parse_section(sections, crn)
-
-                previous_status = course["status"]
-                current_status = section["status"]
-
-                status_changed = (
-                    previous_status in ("OPEN", "CLOSED")
-                    and current_status in ("OPEN", "CLOSED")
-                    and previous_status != current_status
-                )
-
-                # 5. Persist successful checks
-                if persist_state:
-                    save_section(subject, term, section)
-
-                result = format_course(
-                    label,
-                    crn,
-                    section,
-                    notification=persist_state and status_changed,
-                )
-
-                # 6. Preserve existing Discord notifications
-                if persist_state and status_changed:
-                    message = (
-                        f"{label} | Term {term} | "
-                        f"CRN {crn} | {current_status} | "
-                        f"{section['seats_remaining']} seats remaining"
-                    )
-
-                    notification_logger.info(message)
-                    send_discord_notification(message)
-
-                results.append(result)
-
-                if persist_state:
-                    logger.info(
-                        "%s | Term %s | CRN %s | %s | %s/%s enrolled",
-                        label,
-                        term,
-                        crn,
-                        current_status,
-                        section["current_enrollment"],
-                        section["max_enrollment"],
-                    )
-
-            except (
-                ValueError,
-                KeyError,
-                TypeError,
-                pymysql.MySQLError,
-            ) as error:
-                errors += 1
-                group_errors += 1
-
-                if persist_state:
-                    logger.error(
-                        "%s | Term %s | CRN %s | Check failed: %s",
-                        label, term, crn, error
-                    )
-
-                results.append(
-                    f"ERROR: {label}, CRN {crn}: {error}"
-                )
-
-        # Synchronize all cached sections using the same Banner response.
-        if persist_state and group_errors == 0:
-            try:
-                sync_department(subject, term, data=sections)
-
-                logger.info(
-                    "Synchronized department %s for term %s",
-                    subject,
-                    term,
-                )
-
-            except (
-                requests.RequestException,
-                ValueError,
-                KeyError,
-                TypeError,
-                pymysql.MySQLError,
-            ) as error:
-                errors += 1
-
-                logger.error(
-                    "Department sync failed for %s %s: %s",
+                    "Department check failed for %s %s: %s",
                     subject,
                     term,
                     error,
                 )
+
+            results.append(
+                f"ERROR: Department {subject}, term {term}: {error}"
+            )
 
     # 7. Return term for console output
     terms = {course["term"] for course in courses}
