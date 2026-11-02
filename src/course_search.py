@@ -5,6 +5,7 @@ from src.database import (
     search_cached_courses,
 )
 from src.department_sync import sync_department
+from src.sync_lock import department_lock
 
 
 def search_courses(subject, course_number, term):
@@ -25,9 +26,19 @@ def search_courses(subject, course_number, term):
 
     # Cache is missing or expired.
     try:
-        sync_department(subject, term)
+        with department_lock(subject, term, timeout=30):
+            if is_department_cache_fresh(subject, term):
+                return {
+                    "sections": search_cached_courses(
+                        subject, course_number, term
+                    ),
+                    "source": "cache",
+                    "stale": False,
+                }
 
-    except (requests.RequestException, ValueError):
+            sync_department(subject, term)
+
+    except (requests.RequestException, ValueError, TimeoutError):
         # If Banner is unavailable, try existing cached results.
         cached = search_cached_courses(
             subject, course_number, term
