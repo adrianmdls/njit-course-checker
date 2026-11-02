@@ -2,13 +2,13 @@ from src.njit_scraper import get_sections, parse_all_sections
 from src.database import get_connection
 
 
-def sync_department(subject, term):
-    """Synchronize a department's catalog without overwriting monitored states."""
+def sync_department(subject, term, data=None):
+    """Synchronize a department's courses and sections."""
     subject = subject.strip().upper()
-    term = str(term).strip()
 
-    # Fetch and parse before opening the database transaction.
-    data = get_sections(subject, term)
+    if data is None:
+        data = get_sections(subject, term)
+
     sections = parse_all_sections(data)
 
     if not sections:
