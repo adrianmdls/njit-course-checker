@@ -1,17 +1,22 @@
-function App() {
-  return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-      <div className="bg-white p-10 rounded-xl shadow-lg text-center">
-        <h1 className="text-3xl font-bold text-red-600">
-          NJIT Course Availability Checker
-        </h1>
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router'
+import MainLayout from './layouts/MainLayout'
+import Login from './pages/Login'
+import Register from './pages/Register'
+import Dashboard from './pages/Dashboard'
 
-        <p className="mt-4 text-gray-600">
-          React + Vite + Tailwind CSS
-        </p>
-      </div>
-    </div>
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route element={<MainLayout />}>
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/account" element={<h1 className="p-10">Account (Coming Soon)</h1>} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   )
 }
-
-export default App
