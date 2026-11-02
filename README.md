@@ -113,6 +113,4 @@ docker compose down
 Configuration is managed through `courses.json` and environment variables passed through Docker Compose. Runtime data is preserved in the host's `data/` directory.
 
 ## Documentation
-
-- [Development](docs/development.md): Application design, implementation process, and technical decisions.
 - [Operations](docs/operations.md): Docker deployment, configuration, and container management.

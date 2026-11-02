@@ -211,13 +211,13 @@ The checker continues monitoring courses and recording status changes locally.
 To send a test message without waiting for a course availability change, run:
 
 ```bash
-docker exec -w /app/src njit-course-checker \
-  python3 -c 'from discord_notify import send_discord_notification; print(send_discord_notification("NJIT Course Checker: Test notification"))'
+docker exec -w /app njit-course-checker \
+  python3 -c 'from src.discord_notify import send_discord_notification; print(send_discord_notification("NJIT Course Checker: Test notification"))'
 ```
 
 The command returns `True` if the webhook request succeeds or `False` if the webhook is disabled or the request fails.
 
-The `/app/src` path assumes the container stores Python source files there. Adjust it if the Dockerfile uses a different directory.
+The `/app` working directory is the project root, allowing Python to resolve the `src` package.
 
 The test does not modify `state.json` or create an availability-change event.
 
