@@ -6,7 +6,15 @@ export default function Header() {
   const isAuthPage = ['/login', '/register'].includes(location.pathname)
 
   const navButton =
-    'inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 px-4 py-2.5 font-medium transition-colors hover:bg-slate-50'
+    'inline-flex h-[50px] shrink-0 items-center justify-center gap-2 rounded-md border px-4 py-2.5 font-semibold transition-colors'
+
+  function navButtonClass(path) {
+    return `${navButton} ${
+      location.pathname === path
+        ? 'bg-red-50 text-[#D60000] border-[#D60000]'
+        : 'bg-white text-[#0B1733] border-slate-300 hover:bg-slate-50'
+    }`
+  }
 
   return (
     <header className="border-b border-slate-200 bg-white">
@@ -25,22 +33,38 @@ export default function Header() {
         >
           {isAuthPage ? (
             <>
-              <Link to="/login" className={navButton}>
+              <Link
+                to="/login"
+                className={`${navButtonClass('/login')} w-[120px]`}
+                aria-current={location.pathname === '/login' ? 'page' : undefined}
+              >
                 Login
               </Link>
 
-              <Link to="/register" className={navButton}>
+              <Link
+                to="/register"
+                className={`${navButtonClass('/register')} w-[120px]`}
+                aria-current={location.pathname === '/register' ? 'page' : undefined}
+              >
                 Register
               </Link>
             </>
           ) : (
             <>
-              <Link to="/dashboard" className={navButton}>
+              <Link
+                to="/dashboard"
+                className={navButtonClass('/dashboard')}
+                aria-current={location.pathname === '/dashboard' ? 'page' : undefined}
+              >
                 <House size={20} />
                 Home
               </Link>
 
-              <Link to="/account" className={navButton}>
+              <Link
+                to="/account"
+                className={navButtonClass('/account')}
+                aria-current={location.pathname === '/account' ? 'page' : undefined}
+              >
                 <UserRound size={20} />
                 Account
               </Link>
