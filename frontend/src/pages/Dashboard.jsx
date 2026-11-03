@@ -43,8 +43,8 @@ export default function Dashboard() {
 }
 
   return (
-    <div className="mx-auto w-full max-w-[1700px] px-4 py-10 md:px-12">
-      <div className="rounded-xl bg-white px-5 py-6 shadow-sm md:px-8">
+    <div className="mx-auto w-full max-w-[1700px] px-3 py-6 sm:px-6 md:px-12 md:py-10">
+      <div className="rounded-xl bg-white px-3 py-5 shadow-sm sm:px-5 md:px-8 md:py-6">
 
         
         {/* Dashboard tabs */}
@@ -55,7 +55,7 @@ export default function Dashboard() {
         ].map(({ id, label, Icon }) => (
             <div
             key={id}
-            className={`border-b-[3px] pb-2 ${
+            className={`min-w-0 flex-1 border-b-[3px] pb-2 sm:flex-none ${
                 activeTab === id
                 ? 'border-[#D60000]'
                 : 'border-transparent'
@@ -64,7 +64,7 @@ export default function Dashboard() {
             <button
                 type="button"
                 onClick={() => setActiveTab(id)}
-                className={`flex min-h-[54px] cursor-pointer items-center justify-center gap-3 rounded-md px-6 text-lg font-semibold transition-colors sm:min-w-[275px] ${
+                className={`flex min-h-[48px] w-full cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-3 text-sm font-semibold transition-colors sm:min-h-[54px] sm:min-w-[275px] sm:gap-3 sm:px-6 sm:text-lg ${
                 activeTab === id
                     ? 'bg-[#D60000] text-white'
                     : 'bg-slate-50 text-[#0B1733] hover:bg-slate-100'
