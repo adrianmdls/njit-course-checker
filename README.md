@@ -1,3 +1,5 @@
+**This documentation is currently outdated and will be updated once I finish implementing the full-stack, multi-container version of the application.**
+
 # NJIT Course Availability Checker
 
 A Dockerized Python application for monitoring NJIT course availability.
