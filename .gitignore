@@ -32,5 +32,25 @@ data/*
 .idea/
 tempCodeRunnerFile.py
 
-# Backup Files
+# Backup files
 backups/
+
+# Terraform local data, state, secrets, and crash logs
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+!**/.terraform.lock.hcl
+
+# Draw.io files
+*.drawio.bkp
+*.drawio.dtmp
