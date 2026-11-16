@@ -78,9 +78,6 @@ services:
     volumes:
       - mariadb_data:/var/lib/mysql
       - ./database/init/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./database/migrations/001-sessions.sql:/docker-entrypoint-initdb.d/02-sessions.sql:ro
-      - ./database/migrations/02-course-catalog.sql:/docker-entrypoint-initdb.d/03-course-catalog.sql:ro
-      - ./database/migrations/03-cancelled-status.sql:/docker-entrypoint-initdb.d/04-cancelled-status.sql:ro
 
     ports:
       - "127.0.0.1:3307:3306"
