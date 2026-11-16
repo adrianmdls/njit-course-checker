@@ -38,11 +38,11 @@ CREATE TABLE IF NOT EXISTS Watchlists (
 
     CONSTRAINT fk_watchlist_user
         FOREIGN KEY (user_id)
-        REFERENCES users(id)
+        REFERENCES Users(id)
         ON DELETE CASCADE,
 
     CONSTRAINT fk_watchlist_section
         FOREIGN KEY (section_id)
-        REFERENCES sections(id)
+        REFERENCES Sections(id)
         ON DELETE CASCADE
 ) ENGINE=InnoDB;
