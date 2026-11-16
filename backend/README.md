@@ -1,40 +1,40 @@
-# Express backend
+# Express Backend
 
-## Files
+Express provides the authentication API and database health check. Nginx forwards `/api/` requests to `backend:3000`, and Express uses a shared mysql2 connection pool to reach MariaDB at `db:3306` over the Compose network. The backend has no published host port.
 
-- `src/server.js`: environment validation, database pool, health route, JSON error responses, and graceful shutdown.
-- `package.json`: start command and the Express/mysql2 dependencies.
-- `package-lock.json`: reproducible dependency versions for `npm ci`.
-- `Dockerfile`: Node 24 Alpine image, production dependencies, and an unprivileged runtime user.
-- `.dockerignore`: excludes local dependencies, environment files, and logs from the build context.
+For installation, environment setup, and database initialization, see the [root README](../README.md).
 
-## Configuration and networking
+## API Endpoints
 
-Set `DB_PASSWORD` and `DB_ROOT_PASSWORD` in the root `.env` file using `.env.example` as a guide. Never commit secrets. Optional `BACKEND_PORT` defaults to 3000.
+| Method | Path | Request / result |
+|---|---|---|
+| GET | `/api/health` | Runs `SELECT 1`; returns `200` when connected or `503` when unavailable |
+| POST | `/api/auth/register` | `{username, email, password}`; creates an account (`201`) |
+| POST | `/api/auth/login` | `{identifier, password}`; username or email login, returns user details (`200`) or invalid credentials (`401`) |
+| POST | `/api/auth/logout` | `{}`; destroys the session and clears the cookie (`204`) |
+| GET | `/api/auth/me` | Returns the current user (`200`) or unauthenticated/expired session (`401`) |
 
-Compose supplies `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` to the backend. All services share the existing default Compose network. Docker DNS resolves `db` to MariaDB, which listens on container port 3306 without publishing a host port. The backend starts after MariaDB's health check passes. The frontend and checker definitions are unchanged; Nginx does not yet proxy API requests.
+Registration requires a username of 3–50 letters, digits, or underscores and a password of 15–128 Unicode code points. Invalid registration input returns `400`; duplicate username/email returns `409`.
 
-The mysql2 pool opens connections as needed and reuses up to five connections. Each `pool.query` automatically borrows and releases a connection. Up to ten requests can wait when all connections are busy. Connection and query timeouts are five seconds. SIGTERM/SIGINT closes the HTTP server and pool, with a ten-second shutdown deadline.
+POST requests require JSON, an `Origin` matching `APP_ORIGIN`, and `X-Requested-With: NJIT-Course-Checker`. The React request helper supplies the application headers; the browser supplies Origin.
 
-## Run and verify
+## Authentication
 
-From the repository root:
+Passwords are hashed with Argon2id. Login regenerates the session ID; MariaDB stores session data while an HttpOnly, SameSite=Lax cookie identifies the session. Sessions survive backend restarts, expire after 30 minutes idle or eight hours total, and are destroyed on logout. Registration does not automatically log users in.
 
-```sh
-docker compose up -d --build --wait backend
-curl -i http://127.0.0.1:3000/api/health
-docker compose logs backend
-```
+Email verification and password reset are not implemented; unverified users may log in. Login and registration are rate limited.
 
-Use your configured `BACKEND_PORT` in URLs if changed. A successful `SELECT 1` returns HTTP 200 with `{"status":"ok","database":"connected"}`. Database failures return HTTP 503 with `{"status":"error","database":"unavailable"}`; database details and credentials are not returned. Unknown routes return HTTP 404.
+## Configuration Notes
 
-To test an outage, briefly stop MariaDB (this also interrupts checker database access), test, and immediately restore it:
+Compose supplies these backend variables:
 
-```sh
-docker compose stop db
-curl -i http://127.0.0.1:3000/api/health
-docker compose start --wait db
-curl -i http://127.0.0.1:3000/api/health
-```
+| Variable | Purpose |
+|---|---|
+| `DB_HOST`, `DB_PORT` | Database address (`db:3306` in Compose) |
+| `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Database name and credentials |
+| `PORT` | Express listening port (`3000`) |
+| `APP_ENV` | `development` permits local HTTP; `production` requires HTTPS and Secure cookies |
+| `APP_ORIGIN` | Exact browser origin, without a trailing slash; defaults to `http://localhost:8080` |
+| `SESSION_SECRET` | Required signing secret, at least 32 bytes; changing it invalidates existing cookies |
 
-Always restore `db`, even if the request fails. No schema changes are required. Start the entire stack with `docker compose up -d --build`.
+The `sessions` table must exist before startup; MariaDB initializes it automatically for new Compose database volumes. Existing volumes require any missing migrations to be applied manually. Express does not create the table. `API_SCHEME` configures Nginx's forwarded protocol, not TLS itself. Keep the local values from `.env.example` for the Compose demo.
