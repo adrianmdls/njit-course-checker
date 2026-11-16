@@ -4,6 +4,7 @@ import MainLayout from './layouts/MainLayout'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
+import Account from './pages/Account'
 
 export default function App() {
   return (
@@ -16,7 +17,7 @@ export default function App() {
             <Route path="/register" element={<Register />} />
             <Route element={<RequireAuth />}>
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/account" element={<h1 className="p-10">Account (Coming Soon)</h1>} />
+              <Route path="/account" element={<Account />} />
             </Route>
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Route>
