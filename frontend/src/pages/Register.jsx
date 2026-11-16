@@ -1,3 +1,5 @@
+import { useNavigate } from 'react-router'
+import { authRequest } from '../auth'
 
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
@@ -11,7 +13,10 @@ export default function Register() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [error, setError] = useState('')
 
-  function handleSubmit(event) {
+  const navigate = useNavigate()
+  const [pending, setPending] = useState(false)
+
+  async function handleSubmit(event) {
     event.preventDefault()
 
     if (password !== confirmPassword) {
@@ -20,7 +25,12 @@ export default function Register() {
     }
 
     setError('')
-    // Account creation will be implemented in Milestone 2.
+    setPending(true)
+    try {
+      await authRequest('register', { username, email, password })
+      navigate('/login', { state: { registered: true }, replace: true })
+    } catch (failure) { setError(failure.message) }
+    finally { setPending(false) }
   }
 
   return (
@@ -121,7 +131,9 @@ export default function Register() {
             </p>
           )}
 
+          <p className="text-sm text-slate-600">Username: 3–50 letters, numbers, or underscores. Password: 15–128 characters.</p>
           <button
+            disabled={pending}
             type="submit"
             className="w-full cursor-pointer rounded-md bg-[#D60000] px-4 py-3 font-semibold text-white transition-colors hover:bg-red-700"
           >

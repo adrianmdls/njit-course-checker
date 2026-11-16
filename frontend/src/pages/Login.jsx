@@ -1,3 +1,5 @@
+import { useNavigate, useLocation } from 'react-router'
+import { useAuth } from '../auth'
 
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
@@ -7,9 +9,21 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
 
-  function handleSubmit(event) {
+  const { login } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [error, setError] = useState('')
+  const [pending, setPending] = useState(false)
+
+  async function handleSubmit(event) {
     event.preventDefault()
-    // Authentication will be implemented in Milestone 2.
+    setError('')
+    setPending(true)
+    try {
+      await login(username, password)
+      navigate('/dashboard', { replace: true })
+    } catch (failure) { setError(failure.message) }
+    finally { setPending(false) }
   }
 
   return (
@@ -19,6 +33,7 @@ export default function Login() {
           Login
         </h1>
 
+        {location.state?.registered && <p role="status">Account created. Please log in.</p>}
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label
@@ -70,7 +85,9 @@ export default function Login() {
             </div>
           </div>
 
+          {error && <p role="alert" className="text-red-600">{error}</p>}
           <button
+            disabled={pending}
             type="submit"
             className="w-full cursor-pointer rounded-md bg-[#D60000] px-4 py-3 font-semibold text-white transition-colors hover:bg-red-700"
           >

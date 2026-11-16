@@ -3,12 +3,13 @@ services:
     build: ./backend
     restart: unless-stopped
     init: true
-    ports:
-      - "127.0.0.1:${BACKEND_PORT:-3000}:3000"
     depends_on:
       db:
         condition: service_healthy
     environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET}
       PORT: 3000
       DB_HOST: db
       DB_PORT: 3306
@@ -26,6 +27,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
     container_name: njit-frontend
     restart: unless-stopped
 
@@ -33,6 +37,7 @@ services:
       - "127.0.0.1:8080:80"
 
     environment:
+      API_SCHEME: ${API_SCHEME:-http}
       TZ: America/New_York
 
   checker:
@@ -73,6 +78,9 @@ services:
     volumes:
       - mariadb_data:/var/lib/mysql
       - ./database/init:/docker-entrypoint-initdb.d:ro
+
+    ports:
+      - "127.0.0.1:3307:3306"
 
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
