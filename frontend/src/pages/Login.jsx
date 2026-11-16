@@ -1,4 +1,4 @@
-import { useNavigate, useLocation } from 'react-router'
+import { Link, useNavigate, useLocation } from 'react-router'
 import { useAuth } from '../auth'
 
 import { useState } from 'react'
@@ -94,6 +94,12 @@ export default function Login() {
             Login
           </button>
         </form>
+        <p className="mt-5 text-center text-sm text-slate-600">
+          Don't have an account?{' '}
+          <Link to="/register" className="font-semibold text-[#0B1733] transition-colors hover:text-red-700 hover:underline">
+            Register
+          </Link>
+        </p>
       </div>
     </div>
   )
