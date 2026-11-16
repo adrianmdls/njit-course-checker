@@ -1,118 +1,64 @@
-**This documentation is currently outdated and will be updated once I finish implementing the full-stack, multi-container version of the application.**
-
 # NJIT Course Availability Checker
 
-A Dockerized Python application for monitoring NJIT course availability.
+An IT 610 project under development using Docker Compose to run a React/Nginx frontend, an Express backend, a MariaDB database, and a Python course availability checker.
 
-The checker periodically checks configured course sections, tracks their last known availability, and notifies users when a section transitions between `CLOSED` and `OPEN`.
+The frontend sends `/api/` requests through Nginx to Express, which connects to MariaDB. The Python checker also reads and updates MariaDB. Docker networking connects the services internally.
 
-This project was developed for IT 610 and runs in a single custom Docker container built from Ubuntu 24.04.
+## Current Functionality
+
+- Account registration, login/logout, and session-based access to the dashboard.
+- Express database health endpoint and authentication API.
+- Python monitoring of database-configured sections, availability updates, local logs, and optional Discord notifications.
+
+The dashboard currently displays mock course data. Course search and watchlist management are not yet connected to the Express API. An empty database has no sections to monitor.
 
 ## Project Structure
 
-```
+```text
 njit-course-checker/
-├── README.md
-├── Dockerfile
+├── frontend/          # React application and Nginx configuration
+├── backend/           # Express API
+├── src/               # Python checker and database integration
+├── database/
+│   ├── init/          # Initial database schema
+│   └── migrations/    # Additional schema changes
+├── data/              # Persistent checker logs (excluded from Git)
+├── docs/operations.md
 ├── compose.yaml
-├── .env.example
-├── manual_check
-├── requirements.txt
-├── courses.json
-├── src/
-│   ├── checker.py
-│   ├── discord_notify.py
-│   ├── manual_check.py
-│   ├── njit_scraper.py
-│   └── output.py
-├── data/
-│   ├── .gitkeep
-│   ├── state.json
-│   ├── checker.log
-│   └── notification.log
-└── docs/
-    ├── development.md
-    └── operations.md
+└── .env.example
 ```
-
-Runtime files in `data/` are created as needed and are excluded from Git. The `.env` file is also excluded to prevent exposing webhook URLs.
-
-## Application Behavior
-
-The automated checker:
-
-- Runs immediately when the container starts.
-- Reloads `courses.json` every cycle.
-- Groups configured courses by subject to minimize Banner requests.
-- Tracks the last successful status and remaining seats in `data/state.json`.
-- Logs checker activity and errors to `data/checker.log`.
-- Logs availability changes (`CLOSED → OPEN` and `OPEN → CLOSED`) to `data/notification.log`.
-- Sends optional Discord webhook notifications when course availability changes.
-- Prints detailed course information and notifications to the console.
-- Waits `CHECK_INTERVAL` seconds between cycles, defaulting to 600 seconds.
-- Preserves previous successful state when a check fails.
-
-The manual checker performs a single check without modifying saved state, writing logs, or sending Discord notifications.
-
-## Docker Configuration
-
-The application runs in a single custom Docker container with the following configuration:
-
-- Ubuntu 24.04 base image.
-- `America/New_York` timezone.
-- Configurable `CHECK_INTERVAL` environment variable.
-- Optional `DISCORD_WEBHOOK_URL` environment variable.
-- Read-only bind mount for `courses.json`.
-- Persistent bind mount for `data/`.
-- Docker restart policy of `unless-stopped`.
-- No cron or Docker health check.
 
 ## Quick Start
 
-1. Clone the repository and navigate to the project directory.
+Requires Git, Docker with Compose v2, and internet access to build images. Host installations of Node.js, Python, and MariaDB are not required.
 
-2. Copy the example environment configuration:
+1. Clone the repository and copy the environment template:
 
-   ```bash
+   ```sh
+   git clone https://github.com/adrianmdls/njit-course-checker.git
+   cd njit-course-checker
    cp .env.example .env
    ```
 
-3. Edit `courses.json` to specify the term and courses to monitor.
+2. Edit `.env` and set distinct `DB_ROOT_PASSWORD` and `DB_PASSWORD` values, plus `SESSION_SECRET`. Generate a secret with `openssl rand -hex 32` (requires OpenSSL), then paste the result into `.env`.
 
-4. Optionally configure Discord notifications by adding a webhook URL to `.env`:
+   Keep the local defaults `APP_ENV=development`, `APP_ORIGIN=http://localhost:8080`, and `API_SCHEME=http`. `CHECK_INTERVAL` defaults to 600 seconds; `DISCORD_WEBHOOK_URL` is optional. Never commit `.env`, and keep the session secret stable across restarts. Local HTTP settings are for local use; production requires HTTPS.
 
-   ```dotenv
-   CHECK_INTERVAL=600
-   DISCORD_WEBHOOK_URL=
+3. Build and start the services:
+
+   ```sh
+   docker compose up -d --build --wait
    ```
 
-   Leaving `DISCORD_WEBHOOK_URL` empty disables Discord notifications.
+   For a new database volume, MariaDB automatically runs the base schema and all three migrations in order. No manual migration commands are needed for a fresh installation.
 
-5. Build and start the container:
+   Open **http://localhost:8080**, register, and log in. Use `localhost` to match `APP_ORIGIN`. Check database connectivity at **http://localhost:8080/api/health**.
 
-   ```bash
-   docker compose up -d --build
-   ```
+Existing database volumes do not automatically receive migrations. Back up and inspect an existing database, then apply only missing changes from `database/migrations/`. Do not blindly rerun `02-course-catalog.sql` if `Sections.course_id` already exists.
 
-View automated checker output:
-
-```bash
-docker compose logs -f
-```
-
-Run a manual check:
-
-```bash
-docker compose exec checker manual_check
-```
-
-Stop and remove the container:
-
-```bash
-docker compose down
-```
-
-Configuration is managed through `courses.json` and environment variables passed through Docker Compose. Runtime data is preserved in the host's `data/` directory.
+View service output with `docker compose logs -f`; stop the stack with `docker compose down`. MariaDB persists in a named volume, and checker logs persist in `data/`. **Do not use `docker compose down -v` unless you intend to delete the database.**
 
 ## Documentation
-- [Operations](docs/operations.md): Docker deployment, configuration, and container management.
+
+- [Operations](docs/operations.md): existing operational notes; still describes parts of the older checker setup and will be updated after Milestone 2.
+- [Backend](backend/README.md): API endpoints, authentication, and backend configuration.

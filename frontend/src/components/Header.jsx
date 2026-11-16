@@ -1,9 +1,20 @@
+import { useState } from 'react'
+import { useAuth } from '../auth'
 import { Link, useLocation } from 'react-router'
 import { House, UserRound, LogOut } from 'lucide-react'
 
 export default function Header() {
   const location = useLocation()
-  const isAuthPage = ['/login', '/register'].includes(location.pathname)
+  const { user, logout } = useAuth()
+  const [error, setError] = useState('')
+  const [pending, setPending] = useState(false)
+  async function handleLogout() {
+    setPending(true)
+    setError('')
+    try { await logout() } catch { setError('Logout failed. Please try again.') }
+    finally { setPending(false) }
+  }
+  const isAuthPage = !user
 
   const navButton =
     'inline-flex h-[50px] shrink-0 items-center justify-center gap-2 rounded-md border px-4 py-2.5 font-semibold transition-colors'
@@ -69,13 +80,15 @@ export default function Header() {
                 Account
               </Link>
 
-              <Link
-                to="/login"
+              <button
+                onClick={handleLogout}
+                disabled={pending}
                 className="inline-flex items-center justify-center gap-2 rounded-md bg-[#D60000] px-4 py-2.5 font-medium text-white transition-colors hover:bg-red-700"
               >
                 <LogOut size={20} />
                 Logout
-              </Link>
+              </button>
+              {error && <p role="alert">{error}</p>}
             </>
           )}
         </nav>

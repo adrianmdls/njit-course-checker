@@ -1,3 +1,5 @@
+import { Link, useNavigate } from 'react-router'
+import { authRequest } from '../auth'
 
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
@@ -11,7 +13,10 @@ export default function Register() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [error, setError] = useState('')
 
-  function handleSubmit(event) {
+  const navigate = useNavigate()
+  const [pending, setPending] = useState(false)
+
+  async function handleSubmit(event) {
     event.preventDefault()
 
     if (password !== confirmPassword) {
@@ -20,12 +25,17 @@ export default function Register() {
     }
 
     setError('')
-    // Account creation will be implemented in Milestone 2.
+    setPending(true)
+    try {
+      await authRequest('register', { username, email, password })
+      navigate('/login', { state: { registered: true }, replace: true })
+    } catch (failure) { setError(failure.message) }
+    finally { setPending(false) }
   }
 
   return (
     <div className="flex min-h-[calc(100vh-80px)] items-center justify-center px-4 py-10">
-      <div className="w-full max-w-[545px] rounded-xl bg-white px-9 py-9 shadow-sm">
+      <div className="w-full max-w-[640px] rounded-xl bg-white px-9 py-9 shadow-sm">
         <h1 className="mb-7 text-center text-4xl font-bold text-[#0B1733]">
           Register
         </h1>
@@ -37,6 +47,7 @@ export default function Register() {
             </label>
             <input
               id="register-username"
+              aria-describedby="register-username-help"
               type="text"
               autoComplete="username"
               placeholder="Enter your username"
@@ -45,6 +56,9 @@ export default function Register() {
               required
               className="w-full rounded-md border border-slate-300 px-4 py-3 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-100"
             />
+            <p id="register-username-help" className="mt-1 text-xs text-slate-500">
+              3–50 characters; letters, numbers, and underscores only.
+            </p>
           </div>
 
           <div>
@@ -70,6 +84,7 @@ export default function Register() {
             <div className="relative">
               <input
                 id="register-password"
+                aria-describedby="register-password-help"
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="new-password"
                 placeholder="Enter your password"
@@ -87,6 +102,9 @@ export default function Register() {
                 {showPassword ? <EyeOff size={22} /> : <Eye size={22} />}
               </button>
             </div>
+            <p id="register-password-help" className="mt-1 text-xs text-slate-500">
+              At least 15 characters.
+            </p>
           </div>
 
           <div>
@@ -122,11 +140,18 @@ export default function Register() {
           )}
 
           <button
+            disabled={pending}
             type="submit"
             className="w-full cursor-pointer rounded-md bg-[#D60000] px-4 py-3 font-semibold text-white transition-colors hover:bg-red-700"
           >
             Register
           </button>
+          <p className="text-center text-sm text-slate-600">
+            Already have an account?{' '}
+            <Link to="/login" className="font-semibold text-[#0B1733] transition-colors hover:text-red-700 hover:underline">
+              Log in
+            </Link>
+          </p>
         </form>
       </div>
     </div>
