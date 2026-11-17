@@ -32,6 +32,22 @@ module.exports = function createCourses(pool, auth) {
   });
   // Reuse the very same session initializer and user lookup as /api/auth.
   router.use(auth.sessionMiddleware, auth.requireAuth);
+  router.get('/options', async (req, res) => {
+    if (Object.keys(req.query).length) return res.status(400).json({ error: 'Catalog options do not accept query parameters' });
+    const [rows] = await pool.execute(`SELECT DISTINCT s.term, c.subject
+      FROM Sections s INNER JOIN Courses c ON s.course_id = c.id
+      ORDER BY s.term DESC, c.subject ASC`);
+    const terms = [];
+    for (const { term, subject } of rows) {
+      let entry = terms.at(-1);
+      if (entry?.code !== term) {
+        entry = { code: term, departments: [] };
+        terms.push(entry);
+      }
+      entry.departments.push(subject);
+    }
+    res.json({ terms });
+  });
   router.get('/', async (req, res) => {
     const filters = validate(req.query);
     if (!filters) return res.status(400).json({ error: 'Invalid course search parameters' });

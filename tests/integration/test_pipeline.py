@@ -57,6 +57,14 @@ class PipelineTests(unittest.TestCase):
         return json.loads(self.command("run", "--rm", "--no-deps", "-T", "checker-test",
                                        input=json.dumps({"mode": mode, **options})))
 
+    def verify_browser(self, empty=False):
+        browser = subprocess.run(["node", str(ROOT / "tests/integration/course_search_browser.mjs"),
+                                  f"http://127.0.0.1:{self.http_port}", "empty" if empty else "catalog"], text=True,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+                                 env=dict(os.environ, INTEGRATION_BACKEND_CONTAINER=self.command("ps", "-q", "backend").strip()))
+        self.assertEqual(browser.returncode, 0, browser.stdout + browser.stderr)
+        print(browser.stdout, flush=True)
+
     def setUp(self):
         for table in ("Watchlists", "Sections", "Courses", "Users", "DepartmentSyncs", "sessions"):
             self.sql(f"DELETE FROM {table}")
@@ -171,13 +179,8 @@ class PipelineTests(unittest.TestCase):
             # Nullable legacy values cannot arrive through the normalized sync API.
             self.sql("UPDATE Sections SET capacity=NULL,enrolled=NULL WHERE term=? AND crn=?", ["202710", "12000"])
             browser_before = self.snapshot()
-            browser = subprocess.run(["node", str(ROOT / "tests/integration/course_search_browser.mjs"),
-                                      f"http://127.0.0.1:{self.http_port}"], text=True,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
-                                     env=dict(os.environ, INTEGRATION_BACKEND_CONTAINER=self.command("ps", "-q", "backend").strip()))
-            self.assertEqual(browser.returncode, 0, browser.stdout + browser.stderr)
+            self.verify_browser()
             self.assertEqual(self.snapshot(), browser_before)
-            print(browser.stdout, flush=True)
         changed = self.probe("poll", section_count=53, status="CLOSED", enrolled=29)
         self.assertEqual(changed["errors"], 0, changed)
         after = self.probe("search", queries=[query])[0]["body"]
@@ -187,6 +190,23 @@ class PipelineTests(unittest.TestCase):
                          [{"id": row["id"], "crn": row["crn"]} for row in before["Sections"]])
         self.assertEqual(self.probe("poll", section_count=53, status="CLOSED", enrolled=29)["errors"], 0)
         self.assertEqual(len(self.snapshot()["Sections"]), len(before["Sections"]))
+
+    def test_local_catalog_options_follow_searchable_pairs_without_writes(self):
+        self.assertEqual(self.probe("options", authenticated=False)["status"], 401)
+        self.assertEqual(self.probe("options"), {"status": 200, "body": {"terms": []}})
+        if os.environ.get("RUN_BROWSER_TESTS") == "1":
+            self.verify_browser(empty=True)
+        # Catalog entries and unlinked sections alone must not advertise availability.
+        self.sql("INSERT INTO Courses(subject,course_number,title) VALUES ('PHIL','100','Unscheduled')")
+        self.sql("INSERT INTO Sections(subject,term,crn) VALUES ('MATH','202790','99999')")
+        self.assertEqual(self.probe("submit", subject="ECE", term="202695")["sections"], 2)
+        self.assertEqual(self.probe("submit", subject="CS", term="202710")["sections"], 2)
+        before = self.snapshot()
+        self.assertEqual(self.probe("options"), {"status": 200, "body": {"terms": [
+            {"code": "202710", "departments": ["CS"]},
+            {"code": "202695", "departments": ["ECE"]},
+        ]}})
+        self.assertEqual(self.snapshot(), before)
 
     def test_banner_failure_preserves_all_records_and_sync_times(self):
         self.seed_watchlists()

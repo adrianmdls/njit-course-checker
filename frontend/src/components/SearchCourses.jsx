@@ -3,11 +3,18 @@ import { useEffect, useRef, useState } from 'react'
 import { Search, BookmarkPlus, Check } from 'lucide-react'
 import { useAuth } from '../auth'
 
-const departments = ['CS', 'IT', 'MATH', 'PHIL']
+function termLabel(code) {
+  const year = Number(code.slice(0, 4))
+  const season = { '10': 'Spring', '50': 'Summer', '90': 'Fall', '95': 'Winter' }[code.slice(4)]
+  return season ? `${season} ${year}${code.endsWith('95') ? `–${year + 1}` : ''}` : code
+}
 
 export default function SearchCourses({ courses, onAdd }) {
   const { refresh } = useAuth()
-  const [term, setTerm] = useState('202710')
+  const [term, setTerm] = useState('')
+  const [options, setOptions] = useState(null)
+  const [optionsError, setOptionsError] = useState('')
+  const [optionsAttempt, setOptionsAttempt] = useState(0)
   const [department, setDepartment] = useState('')
   const [courseNumber, setCourseNumber] = useState('')
   const [status, setStatus] = useState('')
@@ -19,6 +26,29 @@ export default function SearchCourses({ courses, onAdd }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const activeRequest = useRef(null)
+  const departments = options?.terms.find(entry => entry.code === term)?.departments ?? []
+
+  useEffect(() => {
+    const controller = new AbortController()
+    async function loadOptions() {
+      try {
+        const response = await fetch('/api/courses/options', {
+          credentials: 'same-origin', signal: controller.signal,
+        })
+        if (controller.signal.aborted) return
+        if (response.status === 401) { refresh(); return }
+        if (!response.ok) throw new Error('Catalog unavailable')
+        const data = await response.json()
+        if (controller.signal.aborted) return
+        setOptions(data)
+        setTerm(current => data.terms.some(entry => entry.code === current) ? current : data.terms[0]?.code ?? '')
+      } catch {
+        if (!controller.signal.aborted) setOptionsError('Unable to load available terms and departments. Please retry.')
+      }
+    }
+    loadOptions()
+    return () => controller.abort()
+  }, [refresh, optionsAttempt])
 
   useEffect(() => () => activeRequest.current?.abort(), [])
 
@@ -62,6 +92,7 @@ export default function SearchCourses({ courses, onAdd }) {
 
   function handleSearch(event) {
     event.preventDefault()
+    if (!options || !term) return
     const filters = { term, sort, order }
     if (department) filters.subject = department
     if (courseNumber.trim()) filters.query = courseNumber.trim().replace(/\s+/g, ' ').toUpperCase()
@@ -83,12 +114,17 @@ export default function SearchCourses({ courses, onAdd }) {
           <select
             id="search-term"
             value={term}
-            onChange={(event) => setTerm(event.target.value)}
+            disabled={!options?.terms.length}
+            onChange={(event) => {
+              const code = event.target.value
+              setTerm(code)
+              const available = options.terms.find(entry => entry.code === code)?.departments ?? []
+              setDepartment(current => available.includes(current) ? current : '')
+            }}
             className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
           >
-            <option value="202690">Fall 2026</option>
-            <option value="202695">Winter 2026–2027</option>
-            <option value="202710">Spring 2027</option>
+            {!options?.terms.length && <option value="">{options ? 'No local terms available' : 'Loading terms…'}</option>}
+            {options?.terms.map(entry => <option key={entry.code} value={entry.code}>{termLabel(entry.code)}</option>)}
           </select>
         </div>
 
@@ -99,6 +135,7 @@ export default function SearchCourses({ courses, onAdd }) {
           <select
             id="search-department"
             value={department}
+            disabled={!term}
             onChange={(event) => setDepartment(event.target.value)}
             className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
           >
@@ -170,7 +207,7 @@ export default function SearchCourses({ courses, onAdd }) {
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || !options || !term}
           className="flex cursor-pointer items-center justify-center gap-2 rounded-md bg-[#D60000] px-6 py-3 font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60 md:col-span-3"
         >
           <Search size={20} />
@@ -178,9 +215,17 @@ export default function SearchCourses({ courses, onAdd }) {
         </button>
       </form>
 
+      {!options && !optionsError && <p role="status" className="mt-6 text-slate-500">Loading available terms and departments…</p>}
+      {optionsError && (
+        <div className="mt-6">
+          <p role="alert" className="text-red-600">{optionsError}</p>
+          <button type="button" onClick={() => { setOptionsError(''); setOptionsAttempt(attempt => attempt + 1) }} className="mt-2 cursor-pointer rounded-md border border-slate-300 px-4 py-2 font-semibold">Retry catalog options</button>
+        </div>
+      )}
+      {options?.terms.length === 0 && <p role="status" className="mt-6 text-slate-500">No searchable local catalog data is available. Selected departments and terms must be synchronized before searching.</p>}
       {loading && <p role="status" className="mt-6 text-slate-500">Loading course sections…</p>}
       {error && <p role="alert" className="mt-6 text-red-600">{error}</p>}
-      {results === null && !loading && !error && (
+      {options?.terms.length > 0 && results === null && !loading && !error && (
         <p className="mt-6 text-slate-500">Choose your filters and search for course sections.</p>
       )}
 

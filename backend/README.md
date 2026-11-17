@@ -13,6 +13,7 @@ For installation, environment setup, and database initialization, see the [root 
 | POST | `/api/auth/login` | `{identifier, password}`; username or email login, returns user details (`200`) or invalid credentials (`401`) |
 | POST | `/api/auth/logout` | `{}`; destroys the session and clears the cookie (`204`) |
 | GET | `/api/auth/me` | Returns the current user (`200`) or unauthenticated/expired session (`401`) |
+| GET | `/api/courses/options` | Session-authenticated locally available terms and departments (`200`) |
 | GET | `/api/courses` | Session-authenticated section search; requires `term`, returns sections and pagination (`200`) |
 | GET | `/api/internal/sync/targets` | Bearer-authenticated unique Watchlist and explicit subject/term pairs (`200`) |
 | POST | `/api/internal/sync/department` | Bearer-authenticated department snapshot; returns processed course, section, and status-change counts (`200`) |
@@ -22,6 +23,14 @@ Registration requires a username of 3–50 letters, digits, or underscores and a
 Authentication POST requests require JSON, an `Origin` matching `APP_ORIGIN`, and `X-Requested-With: NJIT-Course-Checker`. The React request helper supplies the application headers; the browser supplies Origin.
 
 ## Course search
+
+`GET /api/courses/options` accepts no query parameters and returns, for example,
+`{"terms":[{"code":"202710","departments":["CS","IT"]}]}`. Terms sort newest
+first; departments sort alphabetically. Options use distinct term/subject pairs
+from the same joined section/catalog records as search. Unlinked legacy sections
+and courses without sections are excluded. An empty catalog returns
+`{"terms":[]}`. It shares search authentication, no-store/HTTPS controls and
+sanitized `503` handling; unexpected query parameters return `400`.
 
 `GET /api/courses` reads existing MariaDB course and section records. It uses the
 same session middleware, cookie, session store, and `requireAuth` user lookup as

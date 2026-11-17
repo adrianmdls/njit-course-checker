@@ -24,7 +24,7 @@ block Python database imports and check that the database IP is unreachable.
 SQL setup and observations run through the disposable backend container.
 Built test images remain cached for reruns and the focused commands below.
 
-Nine integration tests cover configured and watched targets, deduplication,
+Ten integration tests cover configured and watched targets, deduplication,
 full snapshot polling, actual client GET/POST authentication, stable IDs and
 Watchlists, repeat requests, real status transitions, late transaction failure,
 failed Banner fetches, manual read-only behavior, and application Compose wiring.
@@ -39,6 +39,9 @@ repeat synchronization, updated enrollment/status, and empty unsynchronized
 department/term results. Full-row snapshots prove searches leave course,
 section, Watchlist and sync records unchanged. Internal Docker networks prevent
 searches from reaching live Banner. The 53-section fixture exercises two pages.
+An additional catalog-options test covers empty catalogs, deduplicated local
+term/subject pairs (including ECE and Winter), exclusion of unlinked sections
+and unscheduled courses, authentication and read-only behavior.
 
 `RUN_BROWSER_TESTS=1` requires host Node >=24 and Chrome/Chromium. Set `CHROME_BIN`
 to its executable on systems other than macOS. The dependency-free Chrome
@@ -47,7 +50,11 @@ search parameters, renders synchronized records and statuses, tests pagination,
 Add, empty results, and expires the actual MariaDB session to verify redirection.
 One synchronized row is explicitly changed to NULL capacity/enrollment to test
 legacy nullable values, which the normalized ingestion contract cannot supply.
-Without the flag, only browser verification is omitted; the nine pipeline tests
+Browser checks also capture an unfiltered Spring 2027 request, HTTP status and
+pagination metadata, exercise metadata network failure/retry and expiry, and
+verify term-dependent departments and submitted pagination filters.
+The empty-catalog browser case verifies the explanatory message and disabled search.
+Without the flag, only browser verification is omitted; the ten pipeline tests
 still run. Browser failures fail the suite when requested. Cleanup removes its
 temporary Chrome profile as well as the Compose stack, including on test failure.
 
@@ -83,8 +90,10 @@ printf '%s' '{"mode":"submit","subject":"CS","term":"202710","section_count":53,
 Open `http://127.0.0.1:8089`, register a test account and log in. In Search Courses,
 select Spring 2027, department CS and `CS 100` (or prefix `1`). Expect 53 matches,
 50 on page 1 and three on page 2. Test each status, sort/order, Previous/Next and
-Add. PHIL or Fall 2026 returns an empty list; searching never triggers a Banner
-fetch or synchronization. In browser developer tools, confirm requests use
+Add. Only locally available terms/departments appear. A nonexistent course
+prefix such as `99999` returns an empty list; direct authenticated API requests
+for PHIL or Fall 2026 also return empty results for this fixture. Searches and
+catalog options never trigger Banner or synchronization. In browser developer tools, confirm requests use
 `/api/courses`, `term=202710`, `subject=CS`, `query`, `status`, `sort`, `order`,
 `limit=50`, `offset`, and the session cookie. An unauthenticated request returns
 `401`; the authenticated API is also inspectable directly in those tools.

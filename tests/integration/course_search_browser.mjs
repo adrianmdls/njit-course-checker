@@ -30,6 +30,7 @@ try {
   let id = 0
   const pending = new Map()
   const requests = []
+  const responses = []
   const errors = []
   ws.onmessage = event => {
     const message = JSON.parse(event.data)
@@ -37,6 +38,7 @@ try {
       requests.push(new URL(message.params.request.url))
     }
     if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails)
+    if (message.method === 'Network.responseReceived' && message.params.response.url.includes('/api/courses?')) responses.push(message.params)
     if (!message.id) return
     const callback = pending.get(message.id)
     pending.delete(message.id)
@@ -76,7 +78,44 @@ try {
   await evaluate(`setField('username','course_search_fixture'); setField('password','integration-only-search-password')`)
   await evaluate(`document.querySelector('button[type=submit]').click()`)
   await waitFor(`location.pathname==='/dashboard' && Boolean(button('Search Courses'))`)
+  // A failed metadata request must leave a safe, retryable UI. All successful
+  // responses below still come from the real backend, without interception.
+  await send('Network.setBlockedURLs', { urls: [`${origin}/api/courses/options`] })
   await evaluate(`button('Search Courses').click()`)
+  await waitFor(`Boolean(button('Retry catalog options'))`)
+  assert.ok(await evaluate(`document.querySelector('button[type=submit]').disabled`))
+  await send('Network.setBlockedURLs', { urls: [] })
+  await evaluate(`button('Retry catalog options').click()`)
+  if (process.argv[3] === 'empty') {
+    await waitFor(`document.body.textContent.includes('No searchable local catalog data')`)
+    assert.ok(await evaluate(`document.querySelector('button[type=submit]').disabled`))
+    assert.ok(await evaluate(`document.querySelector('#search-term').disabled`))
+    assert.equal(requests.length, 0)
+    assert.deepEqual(errors, [])
+    console.log('PASS empty local catalog: explanatory message, disabled search, no course search requests')
+  } else {
+  await waitFor(`Boolean(document.querySelector('#search-term option[value="202710"]'))`)
+  // Reproduce Spring 2027 / All Departments / no query / All Statuses explicitly.
+  await evaluate(`setField('search-term','202710'); setField('search-department',''); setField('search-number',''); setField('search-status','')`)
+  await evaluate(`document.querySelector('button[type=submit]').click()`)
+  await waitFor(`document.querySelectorAll('tbody tr').length===50`)
+  assert.deepEqual(Object.fromEntries(requests.at(-1).searchParams), {
+    term:'202710', sort:'course', order:'asc', limit:'50', offset:'0',
+  })
+  assert.equal(responses.at(-1).response.status, 200)
+  const raw = await send('Network.getResponseBody', { requestId: responses.at(-1).requestId })
+  const unfiltered = JSON.parse(raw.base64Encoded ? Buffer.from(raw.body, 'base64').toString() : raw.body)
+  assert.deepEqual(unfiltered.pagination, { limit:50, offset:0, total:53 })
+  console.log('Spring unfiltered request:', requests.at(-1).search, 'HTTP', responses.at(-1).response.status, JSON.stringify(unfiltered.pagination))
+  assert.deepEqual(await evaluate(`[...document.querySelector('#search-department').options].map(option=>option.value)`), ['', 'CS'])
+  await evaluate(`setField('search-department','CS'); setField('search-term','202795')`)
+  assert.equal(await evaluate(`document.querySelector('#search-department').value`), '')
+  assert.deepEqual(await evaluate(`[...document.querySelector('#search-department').options].map(option=>option.value)`), ['', 'IT'])
+  // Paging the still-visible results must keep the submitted Spring filters.
+  await evaluate(`button('Next').click()`)
+  await waitFor(`document.querySelectorAll('tbody tr').length===3`)
+  assert.equal(requests.at(-1).searchParams.get('term'), '202710')
+  await evaluate(`setField('search-term','202710')`)
   await waitFor(`Boolean(document.getElementById('search-term'))`)
   await evaluate(`setField('search-department','CS'); setField('search-number',' cs  100 '); setField('search-sort','crn'); setField('search-order','asc')`)
   await evaluate(`document.querySelector('button[type=submit]').click()`)
@@ -104,17 +143,20 @@ try {
   await waitFor(`document.querySelectorAll('tbody tr').length===17`)
   assert.equal(requests.at(-1).searchParams.get('status'), 'CANCELLED')
   assert.ok(await evaluate(`[...document.querySelectorAll('tbody tr')].every(row=>row.children[5].textContent.trim()==='Cancelled')`))
-  await evaluate(`setField('search-department','PHIL'); setField('search-number',''); setField('search-status','')`)
+  await evaluate(`setField('search-department',''); setField('search-number','99999'); setField('search-status','')`)
   await evaluate(`document.querySelector('button[type=submit]').click()`)
   await waitFor(`document.body.textContent.includes('No matching course sections found')`)
   assert.ok(await evaluate(`button('Previous').disabled && button('Next').disabled`))
   // Expire the actual database session; leave its signed browser cookie intact.
   execFileSync('docker', ['exec', process.env.INTEGRATION_BACKEND_CONTAINER, 'node', '-e',
     "const pool=require('./src/db'); pool.query('UPDATE sessions SET expires=1').finally(()=>pool.end())"], { timeout: 15000 })
-  await evaluate(`document.querySelector('button[type=submit]').click()`)
+  // Reopening Search exercises expiry handling on the metadata endpoint itself.
+  await evaluate(`button('Watchlist').click()`)
+  await evaluate(`button('Search Courses').click()`)
   await waitFor(`location.pathname==='/login' && Boolean(document.getElementById('password'))`)
   assert.deepEqual(errors, [])
-  console.log('PASS real React → Nginx → Express → MariaDB: login, parameters, synchronized rows, statuses/nulls, watchlist Add, pagination, empty results, expired session')
+  console.log('PASS real React → Nginx → Express → MariaDB: catalog options/retry, term-dependent departments, unfiltered Spring, parameters, rows, statuses/nulls, Add, pagination snapshots, empty results, metadata session expiry')
+  }
 } finally {
   ws?.close()
   if (chrome.pid && chrome.exitCode === null) {

@@ -49,6 +49,7 @@ async function serve(pool) {
   });
   const base = `http://127.0.0.1:${server.address().port}`;
   return {
+    options: (cookie = validCookie, query = '') => fetch(`${base}/api/courses/options${query}`, { headers: { Cookie: cookie } }),
     get: (query = 'term=202710', cookie = validCookie, headers = {}) => fetch(`${base}/api/courses?${query}`, {
       headers: { Cookie: cookie, ...headers },
     }),
@@ -70,6 +71,7 @@ test('course search requires a valid session and existing user, not a checker to
       const response = await api.get('term=202710', cookie, { Authorization: 'Bearer test-checker-token' });
       assert.equal(response.status, 401, cookie);
       assert.equal(response.headers.get('cache-control'), 'no-store');
+      assert.equal((await api.options(cookie)).status, 401);
     }
   } finally { await api.close(); }
 });
@@ -124,7 +126,31 @@ test('database failures are sanitized, including connection, SQL, and queue fail
       const response = await api.get();
       assert.equal(response.status, 503);
       assert.deepEqual(await response.json(), { error: 'Service temporarily unavailable' });
+      assert.equal((await api.options()).status, 503);
     }
+  } finally { await api.close(); }
+});
+
+test('catalog options use local DISTINCT joined pairs, reject parameters, and support empty catalogs', async () => {
+  const calls = [];
+  let rows = [{ term: '202795', subject: 'ECE' }, { term: '202710', subject: 'CS' }, { term: '202710', subject: 'IT' }];
+  const api = await serve(fakePool(async (sql, params) => { calls.push({ sql, params }); return [rows]; }));
+  try {
+    const response = await api.options();
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await response.json(), { terms: [
+      { code: '202795', departments: ['ECE'] }, { code: '202710', departments: ['CS', 'IT'] },
+    ] });
+    assert.match(calls[0].sql, /SELECT DISTINCT s.term, c.subject/);
+    assert.match(calls[0].sql, /INNER JOIN Courses c ON s.course_id = c.id/);
+    assert.match(calls[0].sql, /ORDER BY s.term DESC, c.subject ASC/);
+    for (const query of ['?term=202710', '?subject=CS&subject=IT', '?query=1%27%20OR%201=1']) {
+      assert.equal((await api.options(validCookie, query)).status, 400);
+    }
+    assert.equal(calls.length, 1, 'invalid options queries do not access the catalog');
+    rows = [];
+    assert.deepEqual(await (await api.options()).json(), { terms: [] });
   } finally { await api.close(); }
 });
 
@@ -165,6 +191,11 @@ test('MariaDB course search with real login, filters, all sort directions, pagin
       const login = await api.post('login', { identifier: credentials.username, password: credentials.password });
       assert.equal(login.status, 200);
       const cookie = login.headers.get('set-cookie').split(';')[0];
+      const [beforeOptions] = await pool.query('SELECT * FROM Sections ORDER BY id');
+      assert.deepEqual(await (await api.options(cookie)).json(), { terms: [
+        { code: '202795', departments: ['CS'] }, { code: '202710', departments: ['CS', 'IT'] },
+      ] });
+      assert.deepEqual((await pool.query('SELECT * FROM Sections ORDER BY id'))[0], beforeOptions);
       const search = async (query = '') => {
         const response = await api.get(`term=202710${query}`, cookie);
         assert.equal(response.status, 200, query);
@@ -224,6 +255,7 @@ test('MariaDB course search with real login, filters, all sort directions, pagin
       const unavailable = await api.get('term=202710', cookie);
       assert.equal(unavailable.status, 503);
       assert.deepEqual(await unavailable.json(), { error: 'Service temporarily unavailable' });
+      assert.equal((await api.options(cookie)).status, 503);
       assert.equal((await api.post('logout', {}, cookie)).status, 204);
       assert.equal((await api.get('term=202710', cookie)).status, 401);
     } finally {

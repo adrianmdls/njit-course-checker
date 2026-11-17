@@ -56,7 +56,7 @@ def run(options):
     if options.get("invalid_token"):
         os.environ["CHECKER_API_TOKEN"] = "invalid-integration-token"
     try:
-        if mode == "search":
+        if mode in ("search", "options"):
             # Exercise Nginx, real login and cookie reuse; no Banner helper is called.
             with requests.Session() as session:
                 if options.get("authenticated", True):
@@ -70,6 +70,9 @@ def run(options):
                         "identifier": credentials["username"], "password": credentials["password"]}, headers=headers, timeout=10)
                     response.raise_for_status()
                 results = []
+                if mode == "options":
+                    response = session.get("http://frontend/api/courses/options", timeout=10)
+                    return {"status": response.status_code, "body": response.json()}
                 for query in options["queries"]:
                     response = session.get("http://frontend/api/courses", params=query, timeout=10)
                     results.append({"status": response.status_code, "body": response.json()})
