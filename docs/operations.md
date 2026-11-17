@@ -1,344 +1,82 @@
-**Legacy operations reference.** The current HTTP-only polling architecture,
-explicit monitoring configuration, and upgrade requirements are documented in
-[the root README](../README.md#banner-department-synchronization).
-The instructions below for `courses.json`, SQL-based monitoring, local state,
-and automatic Discord notifications no longer describe the running checker.
-
-**This documentation is currently outdated and will be updated once I finish implementing the full-stack, multi-container version of the application.**
-
 # Operations
 
-This document covers normal use of the Dockerized NJIT Course Availability Checker.
+Run commands from the repository root. See the [root guide](../README.md) for
+installation, monitoring targets, and legacy-database upgrades, and the
+[backend guide](../backend/README.md) for API/configuration details.
 
-## Configure Courses
+## Routine commands
 
-Edit `courses.json` before starting the container.
-
-```json
-{
-  "term": "202690",
-  "courses": {
-    "94353": "IT 610-101",
-    "91923": "CS 288-005"
-  }
-}
+```sh
+docker compose ps                    # Service status
+docker compose logs -f               # Follow service output; Ctrl+C stops following
+docker compose stop                 # Stop without removing containers
+docker compose start                # Start existing containers
+docker compose restart              # Restart without applying changed configuration
+docker compose up -d --build --wait  # Rebuild/recreate after code or configuration changes
+docker compose down                 # Remove containers and networks; retain database volume
 ```
 
-- `term` is the NJIT Banner term code.
-- Each key is a CRN.
-- Each value is a readable course label.
-- The first word of the label must match the Banner subject, such as `IT` or `CS`.
+MariaDB persists in a named volume. Checker activity is logged to
+`data/checker.log`, mounted from the host. Do not use `docker compose down -v`
+unless you intend to delete the database. The current checker does not write
+`state.json` or `notification.log`.
 
-The checker reloads this file every cycle, so course changes do not require rebuilding the image.
+## Monitoring and manual checks
 
-#### Banner Term Codes
+Monitoring targets come from backend Watchlists and `CHECKER_MONITORING_TARGETS`.
+The browser's demo watchlist does not update either source. Changing explicit
+targets requires recreating the backend; changing `CHECK_INTERVAL` requires
+recreating the checker. The interval is a positive number of seconds to wait
+after each completed cycle, defaulting to 600.
 
-The NJIT Banner term codes used by this project follow this pattern: the first four digits represent the year, and the final two digits represent the term.
+The supported read-only manual command is:
 
-| Code | Term |
-|---|---|
-| `10` | Spring |
-| `50` | Summer |
-| `90` | Fall |
-| `95` | Winter |
-
-Examples:
-
-- `202610` = Spring 2026
-- `202650` = Summer 2026
-- `202690` = Fall 2026
-- `202695` = Winter 2026-2027
-
-## Configure Environment Variables
-
-Runtime settings are configured using a `.env` file in the project root.
-
-Copy the example configuration:
-
-```bash
-cp .env.example .env
-```
-
-The file contains:
-
-```dotenv
-CHECK_INTERVAL=600
-DISCORD_WEBHOOK_URL=
-```
-
-| Variable | Description | Default |
-|---|---|---|
-| `CHECK_INTERVAL` | Seconds between automated checks | `600` |
-| `DISCORD_WEBHOOK_URL` | Optional Discord webhook URL for availability notifications | Empty (disabled) |
-
-`CHECK_INTERVAL` must be a positive integer.
-
-`DISCORD_WEBHOOK_URL` is optional. Leaving it empty disables Discord notifications without affecting the checker.
-
-The `.env` file is excluded from Git using `.gitignore` to prevent accidentally committing the webhook URL.
-
-## Persistent Data
-
-Runtime data is stored in the local `data/` directory.
-
-```text
-data/
-├── state.json
-├── checker.log
-└── notification.log
-```
-
-The directory is bind-mounted into the container so state and logs remain available if the container is stopped, removed, or recreated.
-
-If the directory does not exist yet, create it with:
-
-```bash
-mkdir -p data
-```
-
-## Build and Start
-
-From the project root:
-
-```bash
-docker compose up -d --build
-```
-
-This command:
-
-- builds the custom Docker image
-- creates the container
-- starts the checker in the background
-- applies the configured restart policy
-- mounts `courses.json` and `data/`
-- passes configured environment variables into the container
-
-The checker runs immediately when the container starts.
-
-After each cycle, it waits for `CHECK_INTERVAL` seconds before checking again. The default interval is 600 seconds.
-
-## View Container Output
-
-To follow the live console output:
-
-```bash
-docker compose logs -f
-```
-
-Alternatively, run the same command directly with Docker:
-
-```bash
-docker logs njit-course-checker -f
-```
-
-The output shows the cycle summary, course information, errors, and status-change events.
-
-Press `Ctrl+C` to stop following the logs. This does not stop the container.
-
-## Persistent Logs
-
-Automated checker activity and errors are stored in:
-
-```text
-data/checker.log
-```
-
-Course status-change events are stored separately in:
-
-```text
-data/notification.log
-```
-
-The checker records both:
-
-- `CLOSED → OPEN`
-- `OPEN → CLOSED`
-
-The first successful check establishes the baseline and does not create a status-change event.
-
-## Discord Webhook Notifications
-
-The checker supports optional Discord webhook notifications when a course changes availability.
-
-### Enable Discord Notifications
-
-1. Open the desired Discord server.
-2. Navigate to **Server Settings → Integrations → Webhooks**.
-3. Create a webhook and select the notification channel.
-4. Copy the generated webhook URL.
-5. Add the URL to `.env`:
-
-```dotenv
-CHECK_INTERVAL=600
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_TOKEN
-```
-
-Recreate the container to apply the updated configuration:
-
-```bash
-docker compose up -d
-```
-
-### Notification Behavior
-
-Discord notifications are sent when:
-
-- A course changes from `CLOSED → OPEN`.
-- A course changes from `OPEN → CLOSED`.
-
-Example notification:
-
-```text
-IT 610-101 | CRN 94353 | OPENED | 1 seat remaining
-```
-
-Notifications are not sent during the initial baseline check or when a course's availability status remains unchanged.
-
-Discord notifications are separate from local logging. Availability changes are recorded in `notification.log` regardless of whether Discord is enabled.
-
-If Discord is unavailable or a webhook request fails, the checker logs a warning and continues operating.
-
-### Disable Discord Notifications
-
-To disable Discord notifications, leave the webhook URL empty:
-
-```dotenv
-DISCORD_WEBHOOK_URL=
-```
-
-Then recreate the container:
-
-```bash
-docker compose up -d
-```
-
-The checker continues monitoring courses and recording status changes locally.
-
-### Test the Webhook
-
-To send a test message without waiting for a course availability change, run:
-
-```bash
-docker exec -w /app njit-course-checker \
-  python3 -c 'from src.discord_notify import send_discord_notification; print(send_discord_notification("NJIT Course Checker: Test notification"))'
-```
-
-The command returns `True` if the webhook request succeeds or `False` if the webhook is disabled or the request fails.
-
-The `/app` working directory is the project root, allowing Python to resolve the `src` package.
-
-The test does not modify `state.json` or create an availability-change event.
-
-## State
-
-The latest successful course state is stored in:
-
-```text
-data/state.json
-```
-
-Failed checks do not overwrite the previous successful state.
-
-If the configured term changes, state from the previous term is not used for availability comparisons. The new term's state is saved after a successful course check.
-
-## Manual Check
-
-Run a one-time check inside the running container:
-
-```bash
+```sh
 docker compose exec checker manual_check
 ```
 
-Alternatively, run the same command directly with Docker:
+It retrieves monitored departments from Express, fetches Banner, and prints
+department summaries without submitting snapshots, changing database records,
+or sending notifications. If the checker is stopped, use
+`docker compose run --rm --no-deps checker manual_check` with the backend running.
+For one-shot synchronization and deterministic verification, use the
+[smoke-test guide](banner-smoke-test.md); run only one synchronization producer.
 
-```bash
-docker exec njit-course-checker manual_check
+Authenticated search reads synchronized MariaDB records. Searching an
+unsynchronized department/term returns an empty list and never triggers Banner.
+The UI loads available terms and departments from `/api/courses/options`, chooses
+the newest local term initially, and shows only departments available for the
+selected term. Changing terms clears an unavailable department selection.
+Catalog options and searches never initiate synchronization. If no local catalog
+data exists, the form explains this and disables search. Reopen the search tab
+after a synchronization to refresh its options. Existing rows remain searchable
+even when their department/term is no longer actively monitored.
+
+## Banner term codes
+
+The first four digits identify the year:
+
+| Suffix | Term | Example |
+|---|---|---|
+| `10` | Spring | `202710` = Spring 2027 |
+| `50` | Summer | `202750` = Summer 2027 |
+| `90` | Fall | `202690` = Fall 2026 |
+| `95` | Winter | `202695` = Winter 2026–2027 |
+
+Use the appropriate real term when configuring monitoring; examples are not
+automatically active targets.
+
+## Notifications
+
+Automatic Discord and email notifications are inactive. The local dashboard
+notification toggle is a demo control. The retained Discord utility can still
+send a manual message when `DISCORD_WEBHOOK_URL` is configured in the checker:
+
+```sh
+docker compose exec checker python -c \
+  'from src.discord_notify import send_discord_notification; print(send_discord_notification("NJIT Course Checker: Test notification"))'
 ```
 
-The manual check:
-
-- checks every course in `courses.json`
-- prints the current results
-- exits after one run
-- does not modify `state.json`
-- does not write to `checker.log`
-- does not write to `notification.log`
-- does not send Discord notifications
-- does not create availability-change events
-
-## Change the Check Interval
-
-The check interval is configured using `CHECK_INTERVAL` in `.env`.
-
-For example:
-
-```dotenv
-CHECK_INTERVAL=300
-DISCORD_WEBHOOK_URL=
-```
-
-`CHECK_INTERVAL` must be a positive integer representing seconds.
-
-Examples:
-
-- `300` = 5 minutes
-- `600` = 10 minutes
-- `1800` = 30 minutes
-
-After changing `.env`, recreate the container:
-
-```bash
-docker compose up -d
-```
-
-Docker Compose will apply the updated configuration.
-
-## Stop and Start
-
-Stop the container without removing it:
-
-```bash
-docker compose stop
-```
-
-Start it again:
-
-```bash
-docker compose start
-```
-
-Restart it:
-
-```bash
-docker compose restart
-```
-
-Because the container uses `restart: unless-stopped`, Docker will restart it after a Docker or host restart unless it was manually stopped.
-
-## Remove the Container
-
-Stop and remove the Compose-managed container:
-
-```bash
-docker compose down
-```
-
-The local `data/` directory is not removed, so saved state and logs remain available.
-
-## Rebuild After Code Changes
-
-After modifying application code or the Dockerfile, rebuild and recreate the container:
-
-```bash
-docker compose up -d --build
-```
-
-The mounted `data/` directory preserves the existing state and logs.
-
-## Check Container Status
-
-View the current Compose service status:
-
-```bash
-docker compose ps
-```
+It returns `True` on success and `False` when disabled or unsuccessful. Recreate
+the checker after changing the webhook setting. This manual command sends an
+actual message; it is not part of automated verification.

@@ -47,8 +47,9 @@ module.exports = async function createAuth(pool) {
   router.use('/login', limiter(10, 15 * 60 * 1000));
   router.use('/register', limiter(5, 60 * 60 * 1000));
   router.use(express.json({ limit: '8kb' }));
-  router.use(session({ name: cookieName, secret: process.env.SESSION_SECRET, store,
-    resave: false, saveUninitialized: false, rolling: true, cookie }));
+  const sessionMiddleware = session({ name: cookieName, secret: process.env.SESSION_SECRET, store,
+    resave: false, saveUninitialized: false, rolling: true, cookie });
+  router.use(sessionMiddleware);
   const fields = 'id, username, email, email_verified, created_at';
   const safeUser = user => ({ ...user, email_verified: Boolean(user.email_verified) });
   const hashOptions = { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 };
@@ -112,7 +113,7 @@ module.exports = async function createAuth(pool) {
     res.sendStatus(204);
   });
   router.get('/me', requireAuth, (req, res) => res.json({ user: req.user }));
-  return { router, requireAuth, async close() {
+  return { router, sessionMiddleware, requireAuth, async close() {
     clearInterval(cleanup);
     await store.close();
   } };

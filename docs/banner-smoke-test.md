@@ -10,17 +10,21 @@ Requires Docker Compose v2 and host Python 3. No host Python packages are needed
 
 ```sh
 python3 -B tests/integration/test_pipeline.py
+# Also exercise the actual React build through Nginx using local Chrome:
+RUN_BROWSER_TESTS=1 python3 -B tests/integration/test_pipeline.py
 ```
 
 The runner builds the existing application Dockerfiles, creates a randomly named
 test project, and removes it on completion. MariaDB data lives in tmpfs. No host
-ports, application `.env`, production volumes, or production records are used.
+database/backend ports, application `.env`, production volumes, or production records are used.
+The frontend publishes one temporary loopback port; the runner selects it and
+sets the matching test-only `APP_ORIGIN`. Nginx forwards real `/api/` requests.
 The checker has no DB credentials and shares no network with MariaDB; tests also
 block Python database imports and check that the database IP is unreachable.
 SQL setup and observations run through the disposable backend container.
 Built test images remain cached for reruns and the focused commands below.
 
-Eight integration tests cover configured and watched targets, deduplication,
+Ten integration tests cover configured and watched targets, deduplication,
 full snapshot polling, actual client GET/POST authentication, stable IDs and
 Watchlists, repeat requests, real status transitions, late transaction failure,
 failed Banner fetches, manual read-only behavior, and application Compose wiring.
@@ -28,6 +32,31 @@ Failure tests compare all course, section, Watchlist, and synchronization rows;
 timestamps are deliberately aged so accidental freshness updates cannot hide
 within the same second. Fixtures include Winter terms, alphanumeric section
 labels, and titles containing ` - `.
+
+Course-search coverage adds real cookie login, unauthenticated `401`, subject,
+number-prefix/full-code and stored status filters, sorting, pagination totals,
+repeat synchronization, updated enrollment/status, and empty unsynchronized
+department/term results. Full-row snapshots prove searches leave course,
+section, Watchlist and sync records unchanged. Internal Docker networks prevent
+searches from reaching live Banner. The 53-section fixture exercises two pages.
+An additional catalog-options test covers empty catalogs, deduplicated local
+term/subject pairs (including ECE and Winter), exclusion of unlinked sections
+and unscheduled courses, authentication and read-only behavior.
+
+`RUN_BROWSER_TESTS=1` requires host Node >=24 and Chrome/Chromium. Set `CHROME_BIN`
+to its executable on systems other than macOS. The dependency-free Chrome
+DevTools helper does **not** mock fetch: it logs in via React, inspects actual
+search parameters, renders synchronized records and statuses, tests pagination,
+Add, empty results, and expires the actual MariaDB session to verify redirection.
+One synchronized row is explicitly changed to NULL capacity/enrollment to test
+legacy nullable values, which the normalized ingestion contract cannot supply.
+Browser checks also capture an unfiltered Spring 2027 request, HTTP status and
+pagination metadata, exercise metadata network failure/retry and expiry, and
+verify term-dependent departments and submitted pagination filters.
+The empty-catalog browser case verifies the explanatory message and disabled search.
+Without the flag, only browser verification is omitted; the ten pipeline tests
+still run. Browser failures fail the suite when requested. Cleanup removes its
+temporary Chrome profile as well as the Compose stack, including on test failure.
 
 After the integration runner builds the test images, run the focused suites
 separately without application credentials:
@@ -45,6 +74,40 @@ tests; its database group is intentionally skipped without `TEST_DB_PORT`.
 The disposable full-pipeline suite is the repeatable cross-language database
 verification. The existing backend database suite can also be run against a
 fresh disposable database as described in [backend documentation](../backend/README.md#tests).
+
+## Disposable frontend smoke test
+
+For interactive checks, use this separate stack, never the application database:
+
+```sh
+export INTEGRATION_HTTP_PORT=8089 # choose an unused localhost port
+docker compose --env-file /dev/null -p njit-search-smoke -f tests/integration/compose.yaml build backend frontend checker-test
+docker compose --env-file /dev/null -p njit-search-smoke -f tests/integration/compose.yaml up -d --wait frontend
+printf '%s' '{"mode":"submit","subject":"CS","term":"202710","section_count":53,"mixed":true}' | \
+  docker compose --env-file /dev/null -p njit-search-smoke -f tests/integration/compose.yaml run --rm --no-deps -T checker-test
+```
+
+Open `http://127.0.0.1:8089`, register a test account and log in. In Search Courses,
+select Spring 2027, department CS and `CS 100` (or prefix `1`). Expect 53 matches,
+50 on page 1 and three on page 2. Test each status, sort/order, Previous/Next and
+Add. Only locally available terms/departments appear. A nonexistent course
+prefix such as `99999` returns an empty list; direct authenticated API requests
+for PHIL or Fall 2026 also return empty results for this fixture. Searches and
+catalog options never trigger Banner or synchronization. In browser developer tools, confirm requests use
+`/api/courses`, `term=202710`, `subject=CS`, `query`, `status`, `sort`, `order`,
+`limit=50`, `offset`, and the session cookie. An unauthenticated request returns
+`401`; the authenticated API is also inspectable directly in those tools.
+
+To check nullable values and expiration, run the following **only** on this stack,
+then search again (after the first command expect em dashes; after the second
+expect the login page):
+
+```sh
+docker compose --env-file /dev/null -p njit-search-smoke -f tests/integration/compose.yaml exec -T backend node -e "const p=require('./src/db');p.query('UPDATE Sections SET capacity=NULL,enrolled=NULL WHERE crn=12000').finally(()=>p.end())"
+docker compose --env-file /dev/null -p njit-search-smoke -f tests/integration/compose.yaml exec -T backend node -e "const p=require('./src/db');p.query('UPDATE sessions SET expires=1').finally(()=>p.end())"
+docker compose --env-file /dev/null -p njit-search-smoke -f tests/integration/compose.yaml down --volumes --remove-orphans
+unset INTEGRATION_HTTP_PORT
+```
 
 ## Optional local Compose smoke test with live Banner
 
@@ -177,5 +240,6 @@ Known limits remain: no notifications, no snapshot ordering protection for
 multiple producers, and ambiguous completion after an HTTP timeout. The
 standalone legacy search helper still has SQL cache reads and must not run on
 the checker VM without a separate migration. A full department body may also
-hit a proxy body limit before Express; the test stack directly exercises
-Express, so check the deployed proxy with representative real snapshots.
+hit a proxy body limit before Express; fixture ingestion bypasses Nginx even
+though search/browser tests use it, so check the deployed proxy with
+representative real snapshots.

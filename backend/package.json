@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test test/department-sync.test.cjs"
+    "test": "node --test test/*.test.cjs"
   },
   "engines": {
     "node": ">=24"
