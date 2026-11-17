@@ -12,6 +12,57 @@ The frontend sends `/api/` requests through Nginx to Express, which connects to 
 
 The dashboard currently displays mock course data. Course search and watchlist management are not yet connected to the Express API. An empty database has no sections to monitor.
 
+## Banner department synchronization
+
+Department snapshots now follow Banner → Python → Express → MariaDB. Set
+`CHECKER_API_TOKEN` in `.env` to a separate random secret (generate with
+`openssl rand -hex 32`). Compose passes the same token to the backend and checker.
+`CHECKER_API_URL` is the backend base URL without `/api`; it defaults to
+`http://backend:3000` inside Compose. A checker on a separate VM needs a reachable
+HTTPS base URL and the same token. Requests retain certificate verification.
+The direct Compose URL is for development; with `APP_ENV=production`, use the
+trusted HTTPS proxy URL because Express rejects direct HTTP ingestion.
+
+`sync_department(subject, term, data=None)` keeps its existing interface: it
+fetches Banner when `data` is omitted, parses `parse_all_sections()`, and sends
+the resulting list unchanged in `{subject, term, sections}`. Express handles
+validation, transactions, upserts, and locking. Python uses a 5-second connection
+timeout and a 30-second read timeout, raises safe errors on failures, and does
+not follow redirects or automatically retry. Submit snapshots sequentially;
+Express does not detect out-of-order data. The caller prints server-reported
+course/section counts only after success.
+
+This is an intermediate integration. The polling loop still uses MariaDB for
+monitoring reads, individual section writes, and its legacy lock. Its HTTP sync
+call runs **after releasing that lock**. The existing Python search helper also
+delegates synchronization without holding a database lock; its cache reads are
+still direct SQL. No new search functionality is included.
+
+Commit 3 must address legacy monitoring membership and status ownership before
+relying on this path as the final polling architecture. Ingestion links NULL
+`course_id` rows to courses, so unwatched legacy rows no longer match
+`get_sections_to_check()`. Watched rows remain eligible, but Python and Express
+currently both update their statuses, and the returned change count is not a
+notification event stream. Existing Discord behavior is unchanged. Moving the
+HTTP call outside the legacy lock also leaves a gap between Banner fetch and
+submission: avoid concurrent producers until the polling migration is complete.
+
+Run the focused Python tests from the repository root with installed project
+requirements:
+
+```sh
+python -m unittest discover -s tests -v
+```
+
+Alternatively, use the existing checker image and mount the checkout read-only:
+
+```sh
+docker compose build checker
+docker run --rm -v "$PWD:/workspace:ro" -w /workspace \
+  -e PYTHONDONTWRITEBYTECODE=1 njit-course-checker-checker \
+  python -B -m unittest discover -s tests -v
+```
+
 ## Project Structure
 
 ```text
@@ -40,7 +91,7 @@ Requires Git, Docker with Compose v2, and internet access to build images. Host 
    cp .env.example .env
    ```
 
-2. Edit `.env` and set distinct `DB_ROOT_PASSWORD` and `DB_PASSWORD` values, plus `SESSION_SECRET`. Generate a secret with `openssl rand -hex 32` (requires OpenSSL), then paste the result into `.env`.
+2. Edit `.env` and set distinct `DB_ROOT_PASSWORD` and `DB_PASSWORD` values, plus separate `SESSION_SECRET` and `CHECKER_API_TOKEN` secrets. Generate each secret with `openssl rand -hex 32` (requires OpenSSL), then paste the result into `.env`.
 
    Keep the local defaults `APP_ENV=development`, `APP_ORIGIN=http://localhost:8080`, and `API_SCHEME=http`. `CHECK_INTERVAL` defaults to 600 seconds; `DISCORD_WEBHOOK_URL` is optional. Never commit `.env`, and keep the session secret stable across restarts. Local HTTP settings are for local use; production requires HTTPS.
 

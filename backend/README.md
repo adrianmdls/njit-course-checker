@@ -43,7 +43,7 @@ The endpoint uses machine credentials independently of browser sessions. It does
 }
 ```
 
-`sections` uses the existing `parse_all_sections()` field names. Other scraper fields are ignored. The title prefix before the first ` - ` is removed, matching the existing department synchronizer. Subject must be uppercase alphanumeric, start with a letter, and contain at most 10 characters. Term is a six-digit string with Banner suffix `10`, `50`, `90`, or `95` (Winter), matching the existing checker. Course identifiers use `SUBJECT NUMBER`, separated by whitespace; the number starts with a digit and contains at most 20 uppercase alphanumeric characters. The course subject must match the snapshot. CRNs are five-digit strings. Titles and section labels must be nonempty and fit their schema limits of 255 and 20 characters. Enrollment values are nonnegative unsigned 32-bit integers; over-enrollment is allowed. Status must be `OPEN`, `CLOSED`, or `CANCELLED`. Empty snapshots, conflicting course titles, and conflicting duplicate CRNs are rejected. Identical duplicate CRNs count once.
+`sections` uses the existing `parse_all_sections()` field names. Other scraper fields are ignored. Only an exact matching `course + " - "` prefix is removed from a title; other title text is preserved. Subject must be uppercase alphanumeric, start with a letter, and contain at most 10 characters. Term is a six-digit string with Banner suffix `10`, `50`, `90`, or `95` (Winter), matching the existing checker. Course identifiers use `SUBJECT NUMBER`, separated by whitespace; the number starts with a digit and contains at most 20 uppercase alphanumeric characters. The course subject must match the snapshot. CRNs are five-digit strings. Titles and section labels must be nonempty and fit their schema limits of 255 and 20 characters. Enrollment values are nonnegative unsigned 32-bit integers; over-enrollment is allowed. Status must be `OPEN`, `CLOSED`, or `CANCELLED`. Empty snapshots, conflicting course titles, and conflicting duplicate CRNs are rejected. Identical duplicate CRNs count once.
 
 No capture timestamp is required; `snapshot_started_at` is ignored if supplied. The department lock prevents overlapping writes, but does **not** detect out-of-order snapshots. The polling caller must fetch and submit each snapshot sequentially, waiting for completion before the next fetch. If submission fails or times out, finish retrying that snapshot before sending another, or discard it and fetch a fresh snapshot. Do not send delayed retries after submitting newer data. Parallel producers would require snapshot ordering protection in a later change. No schema migration is required.
 
@@ -57,7 +57,13 @@ Counts refer to unique supplied courses/sections. New sections do not count as s
 
 All writes and the successful `DepartmentSyncs.last_synced_at` completion timestamp share one transaction. A MariaDB advisory lock named `njit:sync:<subject>:<term>` rejects overlapping API requests with `409` across backend instances and coordinates with existing callers of `src/sync_lock.py`. Row locks protect comparisons and updates; the advisory lock is released before returning the connection to the pool. Database failures roll back the transaction and return `503` through the backend error handler. Other responses include `400` for invalid input/JSON, `401` for invalid credentials, `413` for oversized JSON, and `415` for a non-JSON content type.
 
-The existing Python checker is unchanged in this commit. Direct database writes that bypass `src/sync_lock.py` do not participate in the advisory lock. Do not run legacy writers against the same sections during API ingestion; migrating that writer is follow-up work. No notifications are sent by this endpoint.
+Python department synchronization submits snapshots through this endpoint using
+`CHECKER_API_URL` and `CHECKER_API_TOKEN`; see the [integration notes](../README.md#banner-department-synchronization).
+The legacy polling loop still reads and writes individual sections directly.
+It releases its Python advisory lock before submitting a snapshot to Express.
+Direct writes that bypass `src/sync_lock.py` do not participate in that lock.
+The final monitoring migration remains follow-up work. No notifications are sent
+by this endpoint.
 
 ## Tests
 
