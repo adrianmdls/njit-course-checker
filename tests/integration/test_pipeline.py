@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import socket
 import unittest
 import uuid
 
@@ -25,19 +26,23 @@ class PipelineTests(unittest.TestCase):
     @classmethod
     def command(cls, *args, input=None):
         result = subprocess.run(cls.compose + list(args), input=input, text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600, env=cls.environment)
         if result.returncode:
             raise AssertionError(f"Docker command failed: {args[0]}\n{result.stdout}\n{result.stderr}")
         return result.stdout
 
     @classmethod
     def setUpClass(cls):
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            cls.http_port = listener.getsockname()[1]
+        cls.environment = dict(os.environ, INTEGRATION_HTTP_PORT=str(cls.http_port))
         cls.compose = ["docker", "compose", "--env-file", os.devnull,
                        "-p", f"njit-banner-test-{uuid.uuid4().hex[:10]}", "-f", str(COMPOSE)]
         cls.addClassCleanup(cls.cleanup)
         print("Building disposable integration stack...", flush=True)
-        cls.command("build", "backend", "checker-test")
-        cls.command("up", "-d", "--wait", "--wait-timeout", "120", "backend", "db")
+        cls.command("build", "backend", "checker-test", "frontend")
+        cls.command("up", "-d", "--wait", "--wait-timeout", "120", "frontend", "backend", "db")
 
     @classmethod
     def cleanup(cls):
@@ -53,7 +58,7 @@ class PipelineTests(unittest.TestCase):
                                        input=json.dumps({"mode": mode, **options})))
 
     def setUp(self):
-        for table in ("Watchlists", "Sections", "Courses", "Users", "DepartmentSyncs"):
+        for table in ("Watchlists", "Sections", "Courses", "Users", "DepartmentSyncs", "sessions"):
             self.sql(f"DELETE FROM {table}")
 
     def seed_watchlists(self):
@@ -128,6 +133,60 @@ class PipelineTests(unittest.TestCase):
             result = self.probe(mode, invalid_token=True, subject="IT", term="202795")
             self.assertIn("HTTP 401", result["error"])
         self.assertEqual(self.snapshot(), before)
+
+    def test_synchronized_course_search_through_proxy(self):
+        self.seed_watchlists()
+        synced = self.probe("poll", section_count=53, mixed=True)
+        self.assertEqual(synced["errors"], 0, synced)
+        self.assertEqual(synced["banner_calls"], [["CS", "202710"], ["IT", "202795"]])
+        before = self.snapshot()
+        query = {"term": "202710", "subject": "CS"}
+        self.assertEqual(self.probe("search", authenticated=False, queries=[query])[0]["status"], 401)
+        queries = [query, {**query, "query": "100"}, {**query, "query": " cs  100 "},
+                   *[{**query, "status": status} for status in ("OPEN", "CLOSED", "CANCELLED")],
+                   {**query, "sort": "crn", "order": "desc", "limit": 2, "offset": 1},
+                   {**query, "sort": "availability", "order": "asc", "limit": 2},
+                   {"term": "202795", "subject": "IT"},
+                   {"term": "202710", "subject": "ECE"}, {"term": "202790", "subject": "CS"}]
+        responses = self.probe("search", queries=queries)
+        self.assertTrue(all(row["status"] == 200 for row in responses), responses)
+        bodies = [row["body"] for row in responses]
+        for body in bodies[:3]:
+            self.assertEqual(body["pagination"], {"limit": 50, "offset": 0, "total": 53})
+            self.assertEqual(len(body["sections"]), 50)
+            self.assertTrue(all(row["subject"] == "CS" and row["course"] == "CS 100" for row in body["sections"]))
+        for body, status, total in zip(bodies[3:6], ("OPEN", "CLOSED", "CANCELLED"), (18, 18, 17)):
+            self.assertEqual(body["pagination"]["total"], total)
+            self.assertTrue(all(row["status"] == status for row in body["sections"]))
+        self.assertEqual([row["crn"] for row in bodies[6]["sections"]], ["12051", "12050"])
+        self.assertEqual(bodies[6]["pagination"], {"limit": 2, "offset": 1, "total": 53})
+        self.assertEqual([row["crn"] for row in bodies[7]["sections"]], ["12000", "12001"])
+        self.assertEqual(bodies[8]["pagination"]["total"], 2)
+        for body in bodies[9:]:
+            self.assertEqual(body, {"sections": [], "pagination": {"limit": 50, "offset": 0, "total": 0}})
+        # Search cannot fetch public Banner: both API networks are internal.
+        # Full-row snapshots detect writes, including synchronization timestamps.
+        self.assertEqual(self.snapshot(), before)
+        if os.environ.get("RUN_BROWSER_TESTS") == "1":
+            # Nullable legacy values cannot arrive through the normalized sync API.
+            self.sql("UPDATE Sections SET capacity=NULL,enrolled=NULL WHERE term=? AND crn=?", ["202710", "12000"])
+            browser_before = self.snapshot()
+            browser = subprocess.run(["node", str(ROOT / "tests/integration/course_search_browser.mjs"),
+                                      f"http://127.0.0.1:{self.http_port}"], text=True,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+                                     env=dict(os.environ, INTEGRATION_BACKEND_CONTAINER=self.command("ps", "-q", "backend").strip()))
+            self.assertEqual(browser.returncode, 0, browser.stdout + browser.stderr)
+            self.assertEqual(self.snapshot(), browser_before)
+            print(browser.stdout, flush=True)
+        changed = self.probe("poll", section_count=53, status="CLOSED", enrolled=29)
+        self.assertEqual(changed["errors"], 0, changed)
+        after = self.probe("search", queries=[query])[0]["body"]
+        self.assertTrue(all(row["status"] == "CLOSED" and row["now"] == 29 for row in after["sections"]))
+        self.assertEqual(after["pagination"]["total"], 53)
+        self.assertEqual(self.sql("SELECT id,crn FROM Sections ORDER BY id"),
+                         [{"id": row["id"], "crn": row["crn"]} for row in before["Sections"]])
+        self.assertEqual(self.probe("poll", section_count=53, status="CLOSED", enrolled=29)["errors"], 0)
+        self.assertEqual(len(self.snapshot()["Sections"]), len(before["Sections"]))
 
     def test_banner_failure_preserves_all_records_and_sync_times(self):
         self.seed_watchlists()

@@ -1,4 +1,4 @@
-# Disposable test stack: no host ports, production volumes, or application .env.
+# Disposable test stack: loopback frontend only; no production volumes or .env.
 services:
   db:
     image: mariadb:lts
@@ -21,7 +21,7 @@ services:
     build: ../../backend
     environment:
       APP_ENV: development
-      APP_ORIGIN: http://localhost:8080
+      APP_ORIGIN: http://127.0.0.1:${INTEGRATION_HTTP_PORT:?Set a disposable frontend port}
       SESSION_SECRET: integration-only-session-secret-0123456789
       CHECKER_API_TOKEN: integration-only-checker-token
       CHECKER_MONITORING_TARGETS: '[{"subject":"IT","term":"202795"},{"subject":"IT","term":"202795"}]'
@@ -39,6 +39,23 @@ services:
       timeout: 5s
       retries: 60
 
+  frontend:
+    image: njit-banner-integration-frontend
+    build: ../../frontend
+    environment:
+      API_SCHEME: http
+    ports:
+      - "127.0.0.1:${INTEGRATION_HTTP_PORT}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [api, browser]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1/api/health]
+      interval: 1s
+      timeout: 5s
+      retries: 60
+
   checker-test:
     profiles: [tools]
     image: njit-banner-integration-checker
@@ -50,11 +67,15 @@ services:
       CHECKER_API_TOKEN: integration-only-checker-token
       PYTHONDONTWRITEBYTECODE: "1"
       NO_PROXY: backend,localhost,127.0.0.1
+      APP_ORIGIN: http://127.0.0.1:${INTEGRATION_HTTP_PORT}
     volumes:
       - ../..:/workspace:ro
     networks: [api]
 
 networks:
+  # Docker does not publish host ports for containers on internal networks only.
+  # Only Nginx joins this bridge; Express and MariaDB remain isolated.
+  browser: {}
   api:
     internal: true
   database:
