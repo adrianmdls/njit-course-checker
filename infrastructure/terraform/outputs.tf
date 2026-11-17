@@ -1,21 +1,21 @@
 output "ecs_cluster_name" {
   description = "Name of the ECS cluster."
-  value       = var.enable_frontend ? aws_ecs_cluster.main[0].name : null
+  value       = aws_ecs_cluster.main[0].name
 }
 
 output "ecs_frontend_service_name" {
   description = "Name of the frontend ECS service."
-  value       = var.enable_frontend ? aws_ecs_service.frontend[0].name : null
+  value       = var.enable_runtime ? aws_ecs_service.frontend[0].name : null
 }
 
 output "alb_dns_name" {
   description = "DNS name of the internet-facing frontend ALB."
-  value       = var.enable_frontend ? aws_lb.frontend[0].dns_name : null
+  value       = var.enable_runtime ? aws_lb.frontend[0].dns_name : null
 }
 
 output "frontend_url" {
   description = "HTTP URL of the frontend through the ALB."
-  value       = var.enable_frontend ? "http://${aws_lb.frontend[0].dns_name}" : null
+  value       = var.enable_runtime ? "http://${aws_lb.frontend[0].dns_name}" : null
 }
 
 output "frontend_repository_url" {

@@ -1,5 +1,5 @@
 resource "aws_lb" "frontend" {
-  count = var.enable_frontend ? 1 : 0
+  count = var.enable_runtime ? 1 : 0
 
   name               = "${var.project_name}-alb"
   internal           = false
@@ -14,7 +14,7 @@ resource "aws_lb" "frontend" {
 }
 
 resource "aws_lb_target_group" "frontend" {
-  count = var.enable_frontend ? 1 : 0
+  count = var.enable_runtime ? 1 : 0
 
   name        = "${var.project_name}-fe-tg"
   vpc_id      = aws_vpc.main.id
@@ -40,7 +40,7 @@ resource "aws_lb_target_group" "frontend" {
 }
 
 resource "aws_lb_listener" "frontend_http" {
-  count = var.enable_frontend ? 1 : 0
+  count = var.enable_runtime ? 1 : 0
 
   load_balancer_arn = aws_lb.frontend[0].arn
   port              = 80

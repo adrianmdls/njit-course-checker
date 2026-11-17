@@ -1,5 +1,6 @@
 resource "aws_ecs_cluster" "main" {
-  count = var.enable_frontend ? 1 : 0
+  # Retain the existing indexed address independently of runtime availability.
+  count = 1
 
   name = "${var.project_name}-cluster"
 
@@ -14,7 +15,7 @@ resource "aws_ecs_cluster" "main" {
 }
 
 resource "aws_ecs_task_definition" "frontend" {
-  count = var.enable_frontend ? 1 : 0
+  count = var.enable_runtime ? 1 : 0
 
   family                   = "${var.project_name}-frontend"
   requires_compatibilities = ["FARGATE"]
@@ -53,7 +54,7 @@ resource "aws_ecs_task_definition" "frontend" {
 }
 
 resource "aws_ecs_service" "frontend" {
-  count = var.enable_frontend ? 1 : 0
+  count = var.enable_runtime ? 1 : 0
 
   name            = "${var.project_name}-frontend"
   cluster         = aws_ecs_cluster.main[0].id
@@ -72,12 +73,11 @@ resource "aws_ecs_service" "frontend" {
     rollback = true
   }
 
-  # Public IPv4 plus the existing IGW route provides HTTPS access to ECR and Logs.
-  # Inbound HTTP remains restricted to the ALB by the existing frontend group.
+  # Each private application subnet reaches ECR and Logs through its AZ-local NAT.
   network_configuration {
-    subnets          = aws_subnet.public[*].id
+    subnets          = aws_subnet.private_app[*].id
     security_groups  = [aws_security_group.frontend.id]
-    assign_public_ip = true
+    assign_public_ip = false
   }
 
   load_balancer {
@@ -90,6 +90,8 @@ resource "aws_ecs_service" "frontend" {
     aws_lb_listener.frontend_http,
     aws_iam_role_policy_attachment.ecs_task_execution,
     aws_route_table_association.public,
+    aws_route_table_association.private_app,
+    aws_route.private_app_default,
     aws_vpc_security_group_ingress_rule.frontend_from_alb,
     aws_vpc_security_group_egress_rule.alb_to_frontend,
     aws_vpc_security_group_egress_rule.frontend_https,

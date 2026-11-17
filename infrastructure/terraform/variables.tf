@@ -10,8 +10,8 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
-variable "enable_frontend" {
-  description = "Enable frontend runtime resources. Disabling removes the ECS runtime, ALB, and frontend logs while preserving foundational infrastructure."
+variable "enable_runtime" {
+  description = "Enable cost-intensive application infrastructure."
   type        = bool
-  default     = true
+  default     = false
 }
