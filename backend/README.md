@@ -1,6 +1,6 @@
 # Express Backend
 
-Express provides authentication, internal Banner snapshot ingestion, and a database health check. Nginx forwards `/api/` requests to `backend:3000`, and Express uses a shared mysql2 connection pool to reach MariaDB at `db:3306` over the Compose network. The backend has no published host port.
+Express provides authentication, course search, internal Banner snapshot ingestion, and a database health check. Nginx forwards `/api/` requests to `backend:3000`, and Express uses a shared mysql2 connection pool to reach MariaDB at `db:3306` over the Compose network. The backend has no published host port.
 
 For installation, environment setup, and database initialization, see the [root README](../README.md).
 
@@ -13,12 +13,60 @@ For installation, environment setup, and database initialization, see the [root 
 | POST | `/api/auth/login` | `{identifier, password}`; username or email login, returns user details (`200`) or invalid credentials (`401`) |
 | POST | `/api/auth/logout` | `{}`; destroys the session and clears the cookie (`204`) |
 | GET | `/api/auth/me` | Returns the current user (`200`) or unauthenticated/expired session (`401`) |
+| GET | `/api/courses` | Session-authenticated section search; requires `term`, returns sections and pagination (`200`) |
 | GET | `/api/internal/sync/targets` | Bearer-authenticated unique Watchlist and explicit subject/term pairs (`200`) |
 | POST | `/api/internal/sync/department` | Bearer-authenticated department snapshot; returns processed course, section, and status-change counts (`200`) |
 
 Registration requires a username of 3–50 letters, digits, or underscores and a password of 15–128 Unicode code points. Invalid registration input returns `400`; duplicate username/email returns `409`.
 
 Authentication POST requests require JSON, an `Origin` matching `APP_ORIGIN`, and `X-Requested-With: NJIT-Course-Checker`. The React request helper supplies the application headers; the browser supplies Origin.
+
+## Course search
+
+`GET /api/courses` reads existing MariaDB course and section records. It uses the
+same session middleware, cookie, session store, and `requireAuth` user lookup as
+`/api/auth`; log in first and send the session cookie. Checker Bearer tokens do
+not authenticate this endpoint. Responses use `Cache-Control: no-store`.
+Production requires HTTPS through the trusted proxy.
+
+| Parameter | Values |
+|---|---|
+| `term` | Required six-digit Banner code ending in `10`, `50`, `90`, or `95` (Winter) |
+| `subject` | Optional uppercase department code, starting with a letter, at most 10 alphanumeric characters |
+| `query` | Optional course number prefix, such as `280`, or full code, such as `CS 280`; case and whitespace are normalized |
+| `status` | Optional stored `OPEN`, `CLOSED`, or `CANCELLED` status |
+| `sort` | `course` (default), `crn`, or `availability` |
+| `order` | `asc` (default) or `desc` |
+| `limit` | Integer from 1 to 100; default 50 |
+| `offset` | Integer from 0 to 2147483647; default 0 |
+
+Unknown parameters, duplicate parameters, invalid values, and conflicting
+subjects in `subject` and `query` return `400`. A course number prefix starts
+with a digit and contains at most 20 alphanumeric characters; raw queries are
+limited to 100 characters. Pagination accepts decimal digits only.
+
+Examples using a cookie jar saved during login:
+
+```sh
+curl -b cookies.txt 'http://localhost:8080/api/courses?term=202710&subject=CS'
+curl -b cookies.txt 'http://localhost:8080/api/courses?term=202795&query=CS%20280&status=OPEN'
+curl -b cookies.txt 'http://localhost:8080/api/courses?term=202710&sort=availability&order=desc&limit=20&offset=20'
+```
+
+The response is `{ "sections": [...], "pagination": { "limit": 50, "offset": 0,
+"total": 123 } }`, with one record per linked section. Each record contains
+`id`, `course`, `subject`, `course_number`, `title`, `term`, `crn`, `section`,
+`max`, `now`, `status`, and `last_checked_at`. CRNs remain strings, nullable
+fields remain null, and timestamps use UTC ISO 8601. Status comes from the stored
+record. No matches return an empty array and total zero; an offset beyond the
+results returns an empty array while retaining the matching total.
+
+Course sorting uses subject, course number, and section number. Availability
+sorting uses capacity minus enrollment, supports over-enrollment, and places
+unknown availability last in either direction. All sorts use section ID as a
+final tie-breaker and apply the requested direction to every tie-breaker.
+Missing, invalid, or expired sessions return `401`; database failures return a
+sanitized `503`. Searches never request data from Banner.
 
 ## Internal department synchronization
 
@@ -89,6 +137,14 @@ TEST_DB_PORT=<disposable-database-port> npm test
 ```
 
 Use a fresh database for each run; the suite creates schema, users, Watchlists, and a failure-injection trigger. Never point these tests at an application database. The full suite checks real MariaDB upserts, section ID preservation, watched/unwatched updates, status changes, rollback of existing and new records, completion timestamp rollback, retries, caller-controlled snapshot ordering, Winter terms, subject collisions, and lock contention. It uses Node's test runner and existing dependencies.
+
+Course search tests additionally cover session authentication, invalid parameters
+and injection attempts, normalized prefixes and full course codes, filters,
+all sort directions, pagination totals and stable ordering, empty results,
+nullable values, and sanitized failures. The MariaDB search test creates and
+drops a separate randomly named schema on the disposable server, exercises
+real registration/login/logout, and injects a SQL failure without affecting the
+sync suite's schema. All database tests run when `TEST_DB_PORT` is supplied.
 
 ## Authentication
 
