@@ -1,0 +1,61 @@
+# Disposable test stack: no host ports, production volumes, or application .env.
+services:
+  db:
+    image: mariadb:lts
+    environment:
+      MARIADB_ROOT_PASSWORD: integration-only-password
+      MARIADB_DATABASE: njit_course_checker
+    tmpfs:
+      - /var/lib/mysql
+    volumes:
+      - ../../database/init/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    networks: [database]
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 1s
+      timeout: 5s
+      retries: 60
+
+  backend:
+    image: njit-banner-integration-backend
+    build: ../../backend
+    environment:
+      APP_ENV: development
+      APP_ORIGIN: http://localhost:8080
+      SESSION_SECRET: integration-only-session-secret-0123456789
+      CHECKER_API_TOKEN: integration-only-checker-token
+      CHECKER_MONITORING_TARGETS: '[{"subject":"IT","term":"202795"},{"subject":"IT","term":"202795"}]'
+      DB_HOST: db
+      DB_NAME: njit_course_checker
+      DB_USER: root
+      DB_PASSWORD: integration-only-password
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [api, database]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 1s
+      timeout: 5s
+      retries: 60
+
+  checker-test:
+    profiles: [tools]
+    image: njit-banner-integration-checker
+    build: ../..
+    working_dir: /workspace
+    command: [python, -B, tests/integration/checker_probe.py]
+    environment:
+      CHECKER_API_URL: http://backend:3000
+      CHECKER_API_TOKEN: integration-only-checker-token
+      PYTHONDONTWRITEBYTECODE: "1"
+      NO_PROXY: backend,localhost,127.0.0.1
+    volumes:
+      - ../..:/workspace:ro
+    networks: [api]
+
+networks:
+  api:
+    internal: true
+  database:
+    internal: true

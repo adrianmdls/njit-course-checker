@@ -106,6 +106,17 @@ docker run --rm -v "$PWD:/workspace:ro" -w /workspace \
   python -B -m unittest discover -s tests -v
 ```
 
+Run the deterministic Python → Express → MariaDB integration tests with Docker
+Compose and host Python 3 (no host packages or application credentials needed):
+
+```sh
+python3 -B tests/integration/test_pipeline.py
+```
+
+The runner creates and removes an isolated test stack. See the
+[local and VMware smoke-test procedure](docs/banner-smoke-test.md) for coverage,
+exact one-shot commands, and deployment checks. Live Banner requests are optional.
+
 ## Project Structure
 
 ```text
@@ -154,5 +165,6 @@ View service output with `docker compose logs -f`; stop the stack with `docker c
 
 ## Documentation
 
+- [Banner smoke tests](docs/banner-smoke-test.md): deterministic integration tests and local/VMware verification.
 - [Operations](docs/operations.md): existing operational notes; still describes parts of the older checker setup and will be updated after Milestone 2.
 - [Backend](backend/README.md): API endpoints, authentication, and backend configuration.

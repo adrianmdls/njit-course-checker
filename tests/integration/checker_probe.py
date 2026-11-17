@@ -1,0 +1,87 @@
+"""One-shot checker-side probe; only Banner I/O is replaced with fixture data."""
+
+import contextlib
+import importlib.abc
+import io
+import json
+import os
+import socket
+import sys
+from unittest.mock import patch
+
+
+class RejectDatabaseImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in ("pymysql", "src.database", "src.sync_lock"):
+            raise AssertionError(f"Checker imported a database module: {fullname}")
+
+
+sys.path.insert(0, "/workspace")
+sys.meta_path.insert(0, RejectDatabaseImports())
+
+import requests
+from src import checker, manual_check
+from src.checker_api import get_monitoring_targets, submit_department_snapshot
+from src.njit_scraper import parse_all_sections
+
+
+def banner(subject, status="OPEN"):
+    courses = [("100", "12345", "001"), ("100", "12346", "H01")] if subject == "CS" else [
+        ("101", "54321", "001"), ("490", "54322", "H01")]
+    tables = []
+    for number, crn, section in courses:
+        title = "Special Topics - AI" if number == "490" else f"{subject} {number} - Introduction"
+        cells = [section, crn, "M", "10:00", "CKB", status, "30", "20",
+                 "Instructor", "In Person", "3", "", ""]
+        tables.append(f'<h4 id="{subject} {number}">{title}</h4><table class="sections-table"><tr>'
+                      + "".join(f"<td>{value}</td>" for value in cells) + "</tr></table>")
+    return [{"SECTIONS_TABLE": "".join(tables)}]
+
+
+def run(options):
+    assert not any(name.startswith("DB_") for name in os.environ), "Checker has DB credentials"
+    mode = options["mode"]
+    if mode == "network":
+        for host in ("db", options["database_ip"]):
+            try:
+                connection = socket.create_connection((host, 3306), timeout=1)
+            except OSError:
+                continue
+            connection.close()
+            raise AssertionError("Checker can connect directly to MariaDB")
+        return {"database_access": False}
+    if options.get("invalid_token"):
+        os.environ["CHECKER_API_TOKEN"] = "invalid-integration-token"
+    try:
+        if mode == "targets":
+            return {"targets": get_monitoring_targets()}
+        if mode == "submit":
+            sections = parse_all_sections(banner(options["subject"], options.get("status", "OPEN")))
+            return submit_department_snapshot(options["subject"], options["term"], sections)
+        calls = []
+
+        def fetch(subject, term):
+            calls.append([subject, term])
+            if options.get("banner_failure"):
+                raise requests.ConnectionError("Fixture Banner service unavailable")
+            return banner(subject, options.get("status", "OPEN"))
+
+        with patch.object(checker, "get_sections", side_effect=fetch):
+            if mode == "manual":
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    code = manual_check.main()
+                return {"exit_code": code, "output": output.getvalue(), "banner_calls": calls}
+            if mode != "poll":
+                raise ValueError("Unknown probe mode")
+            results, errors, term = checker.check_once()
+            return {"results": results, "errors": errors, "term": term, "banner_calls": calls}
+    except requests.RequestException as error:
+        message = str(error)
+        assert "integration-only-checker-token" not in message
+        assert "invalid-integration-token" not in message
+        return {"error": message}
+
+
+if __name__ == "__main__":
+    print(json.dumps(run(json.load(sys.stdin))))
