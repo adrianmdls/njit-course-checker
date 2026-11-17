@@ -9,8 +9,16 @@ The frontend sends `/api/` requests through Nginx to Express, which connects to 
 - Account registration, login/logout, and session-based access to the dashboard.
 - Express database health endpoint and authentication API.
 - Sequential Python polling of watched and explicitly configured departments, with persistence and status-change detection in Express.
+- Authenticated course-section search with term, department, course-prefix and status filters, sorting, and pagination.
 
-The dashboard currently displays mock course data. Course search and watchlist management are not yet connected to the Express API. An empty database has no sections to monitor.
+React searches existing MariaDB records through `GET /api/courses`, using the
+same session cookie as login. Search never fetches Banner or starts a sync.
+Unsynchronized department/term combinations return no results.
+
+The watchlist still uses local React state initialized with mock records. Add,
+remove, and notification toggles are demo controls; they do not persist or update
+backend Watchlists. Configure explicit monitoring targets to populate search
+results in a fresh installation. Automatic notifications are not implemented.
 
 ## Banner department synchronization
 
@@ -23,14 +31,9 @@ HTTPS base URL and the same token. Requests retain certificate verification.
 The direct Compose URL is for development; with `APP_ENV=production`, use the
 trusted HTTPS proxy URL because Express rejects direct HTTP ingestion.
 
-`sync_department(subject, term, data=None)` keeps its existing interface: it
-fetches Banner when `data` is omitted, parses `parse_all_sections()`, and sends
-the resulting list unchanged in `{subject, term, sections}`. Express handles
-validation, transactions, upserts, and locking. Python uses a 5-second connection
-timeout and a 30-second read timeout, raises safe errors on failures, and does
-not follow redirects or automatically retry. Submit snapshots sequentially;
-Express does not detect out-of-order data. The caller prints server-reported
-course/section counts only after success.
+Python parses Banner snapshots and submits them to Express, which handles
+validation, transactions, upserts, and locking. The standalone
+`sync_department(subject, term, data=None)` helper uses the same HTTP API.
 
 The checker retrieves `{targets: [{subject, term}]}` from
 `GET /api/internal/sync/targets`, then fetches, parses, and submits a complete
@@ -61,9 +64,11 @@ WHERE s.course_id IS NULL
 
 Do not automatically classify every candidate as monitored. Previously linked
 legacy rows cannot be recovered from this query; consult your configuration or
-backups as needed. The checked-in `courses.json` is a historical explicit CRN
-list, not an active polling source. Its sample departments can be retained via
-the example above. No schema migration is required.
+backups as needed. The retired `courses.json` sample used term `202690` (Fall
+2026), CRN `94353` (`IT 610-101`), and CRN `91923` (`CS 288-005`). These are
+historical examples, not current targets; the department/term equivalents appear
+in the configuration example above. Moving monitoring configuration to explicit
+targets requires no schema migration.
 
 The polling process and `manual_check` use no Python SQL functions or database
 credentials. `manual_check` retrieves targets and Banner snapshots but does not
@@ -87,35 +92,14 @@ requires a backend-owned event design in a later commit. The standalone
 `src/course_search.py` has no polling/frontend callers and remains an isolated
 legacy command-line helper. Its cache reads in `src/database.py` still require
 manually supplied `DB_*` credentials; these are no longer passed to the checker.
-PyMySQL remains in requirements solely for that helper. No new search API or
-frontend behavior is included.
+PyMySQL remains in requirements solely for that helper. React uses the Express
+course-search API instead.
 
-Run the focused Python tests from the repository root with installed project
-requirements:
-
-```sh
-python -m unittest discover -s tests -v
-```
-
-Alternatively, use the existing checker image and mount the checkout read-only:
-
-```sh
-docker compose build checker
-docker run --rm -v "$PWD:/workspace:ro" -w /workspace \
-  -e PYTHONDONTWRITEBYTECODE=1 njit-course-checker-checker \
-  python -B -m unittest discover -s tests -v
-```
-
-Run the deterministic Python → Express → MariaDB integration tests with Docker
-Compose and host Python 3 (no host packages or application credentials needed):
-
-```sh
-python3 -B tests/integration/test_pipeline.py
-```
-
-The runner creates and removes an isolated test stack. See the
-[local and VMware smoke-test procedure](docs/banner-smoke-test.md) for coverage,
-exact one-shot commands, and deployment checks. Live Banner requests are optional.
+See the [smoke-test procedure](docs/banner-smoke-test.md) for Python unit tests,
+disposable pipeline tests, real React/Nginx/backend browser verification, and
+local/VMware checks. Automated tests use deterministic Banner fixtures; live
+Banner requests are optional. Backend test commands are in the
+[backend guide](backend/README.md#tests).
 
 ## Project Structure
 
@@ -123,7 +107,7 @@ exact one-shot commands, and deployment checks. Live Banner requests are optiona
 njit-course-checker/
 ├── frontend/          # React application and Nginx configuration
 ├── backend/           # Express API
-├── src/               # Python checker and database integration
+├── src/               # Python HTTP checker and retained legacy helpers
 ├── database/
 │   ├── init/          # Initial database schema
 │   └── migrations/    # Additional schema changes
@@ -147,7 +131,7 @@ Requires Git, Docker with Compose v2, and internet access to build images. Host 
 
 2. Edit `.env` and set distinct `DB_ROOT_PASSWORD` and `DB_PASSWORD` values, plus separate `SESSION_SECRET` and `CHECKER_API_TOKEN` secrets. Generate each secret with `openssl rand -hex 32` (requires OpenSSL), then paste the result into `.env`.
 
-   Keep the local defaults `APP_ENV=development`, `APP_ORIGIN=http://localhost:8080`, and `API_SCHEME=http`. `CHECK_INTERVAL` defaults to 600 seconds; `DISCORD_WEBHOOK_URL` is optional. Never commit `.env`, and keep the session secret stable across restarts. Local HTTP settings are for local use; production requires HTTPS.
+   Keep the local defaults `APP_ENV=development`, `APP_ORIGIN=http://localhost:8080`, and `API_SCHEME=http`. Set `CHECKER_MONITORING_TARGETS` to the departments/terms you want synchronized; its default `[]` leaves a fresh installation idle. `CHECK_INTERVAL` defaults to 600 seconds. Never commit `.env`, and keep the session secret stable across restarts. Local HTTP settings are for local use; production requires HTTPS.
 
 3. Build and start the services:
 
@@ -166,5 +150,6 @@ View service output with `docker compose logs -f`; stop the stack with `docker c
 ## Documentation
 
 - [Banner smoke tests](docs/banner-smoke-test.md): deterministic integration tests and local/VMware verification.
-- [Operations](docs/operations.md): existing operational notes; still describes parts of the older checker setup and will be updated after Milestone 2.
+- [Operations](docs/operations.md): routine commands, term codes, logs, and manual checks.
 - [Backend](backend/README.md): API endpoints, authentication, and backend configuration.
+- [Frontend](frontend/README.md): local React development, lint, and build commands.
