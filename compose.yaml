@@ -11,6 +11,7 @@ services:
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET}
       CHECKER_API_TOKEN: ${CHECKER_API_TOKEN:-}
+      CHECKER_MONITORING_TARGETS: ${CHECKER_MONITORING_TARGETS:-[]}
       PORT: 3000
       DB_HOST: db
       DB_PORT: 3306
@@ -47,8 +48,6 @@ services:
     restart: unless-stopped
 
     depends_on:
-      db:
-        condition: service_healthy
       backend:
         condition: service_healthy
 
@@ -58,12 +57,6 @@ services:
       CHECKER_API_URL: ${CHECKER_API_URL:-http://backend:3000}
       CHECKER_API_TOKEN: ${CHECKER_API_TOKEN:-}
       TZ: America/New_York
-
-      DB_HOST: db
-      DB_PORT: 3306
-      DB_NAME: njit_course_checker
-      DB_USER: njit_app
-      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
 
     volumes:
       - ./data:/app/data

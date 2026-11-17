@@ -1,12 +1,11 @@
 import os
 import traceback
 import unittest
-from contextlib import contextmanager
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import requests
 
-from src.checker_api import submit_department_snapshot
+from src.checker_api import get_monitoring_targets, submit_department_snapshot
 from src.department_sync import sync_department
 from src.njit_scraper import parse_all_sections
 
@@ -27,7 +26,7 @@ class CheckerAPITests(unittest.TestCase):
         }, clear=True)
         self.environment.start()
         self.addCleanup(self.environment.stop)
-        post_patch = patch("src.checker_api.requests.post")
+        post_patch = patch("src.checker_api.requests.request")
         self.post = post_patch.start()
         self.addCleanup(post_patch.stop)
         self.response = self.post.return_value
@@ -38,7 +37,7 @@ class CheckerAPITests(unittest.TestCase):
     def test_success_sends_exact_contract_and_bearer_token(self):
         self.assertEqual(submit_department_snapshot("IT", "202795", self.sections), COUNTS)
         self.post.assert_called_once_with(
-            "http://backend:3000/api/internal/sync/department",
+            "POST", "http://backend:3000/api/internal/sync/department",
             json={"subject": "IT", "term": "202795", "sections": self.sections},
             headers={"Authorization": "Bearer test-secret-token"},
             timeout=(5, 30), allow_redirects=False,
@@ -86,6 +85,23 @@ class CheckerAPITests(unittest.TestCase):
             submit_department_snapshot("IT", "202795", self.sections)
         self.assertNotIn("test-secret-token", "".join(traceback.format_exception(caught.exception)))
 
+    def test_retrieves_monitoring_targets(self):
+        targets = [{"subject": "IT", "term": "202795"}]
+        self.response.json.return_value = {"targets": targets}
+        self.assertEqual(get_monitoring_targets(), targets)
+        self.post.assert_called_once_with(
+            "GET", "http://backend:3000/api/internal/sync/targets", json=None,
+            headers={"Authorization": "Bearer test-secret-token"},
+            timeout=(5, 30), allow_redirects=False,
+        )
+
+    def test_invalid_monitoring_response(self):
+        for body in (None, {}, {"targets": None}, {"targets": [{}]}):
+            with self.subTest(body=body):
+                self.response.json.return_value = body
+                with self.assertRaisesRegex(requests.RequestException, "invalid targets"):
+                    get_monitoring_targets()
+
 
 class DepartmentSyncTests(unittest.TestCase):
     @patch("builtins.print")
@@ -111,35 +127,6 @@ class DepartmentSyncTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "No sections found"):
             sync_department("IT", "202795", data=[])
         submit.assert_not_called()
-
-    def test_checker_submits_after_releasing_legacy_lock(self):
-        from src import checker
-
-        held = False
-
-        @contextmanager
-        def lock(*args, **kwargs):
-            nonlocal held
-            held = True
-            try:
-                yield
-            finally:
-                held = False
-
-        def submit(*args, **kwargs):
-            self.assertFalse(held, "Express must be able to acquire the department lock")
-
-        monitored = [{"id": 1, "subject": "IT", "term": "202795", "crn": "12345",
-                      "section_number": "H01", "status": "OPEN"}]
-        with patch.object(checker, "get_sections_to_check", return_value=monitored), \
-             patch.object(checker, "department_lock", side_effect=lock), \
-             patch.object(checker, "get_sections", return_value=BANNER), \
-             patch.object(checker, "save_section"), \
-             patch.object(checker, "send_discord_notification"), \
-             patch.object(checker, "sync_department", side_effect=submit) as sync:
-            _, errors, _ = checker.check_once()
-        self.assertEqual(errors, 0)
-        sync.assert_called_once_with("IT", "202795", data=BANNER)
 
     def test_existing_search_helper_submits_without_database_lock(self):
         from src import course_search

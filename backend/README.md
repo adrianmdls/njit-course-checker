@@ -13,6 +13,7 @@ For installation, environment setup, and database initialization, see the [root 
 | POST | `/api/auth/login` | `{identifier, password}`; username or email login, returns user details (`200`) or invalid credentials (`401`) |
 | POST | `/api/auth/logout` | `{}`; destroys the session and clears the cookie (`204`) |
 | GET | `/api/auth/me` | Returns the current user (`200`) or unauthenticated/expired session (`401`) |
+| GET | `/api/internal/sync/targets` | Bearer-authenticated unique Watchlist and explicit subject/term pairs (`200`) |
 | POST | `/api/internal/sync/department` | Bearer-authenticated department snapshot; returns processed course, section, and status-change counts (`200`) |
 
 Registration requires a username of 3–50 letters, digits, or underscores and a password of 15–128 Unicode code points. Invalid registration input returns `400`; duplicate username/email returns `409`.
@@ -55,15 +56,28 @@ Example response:
 
 Counts refer to unique supplied courses/sections. New sections do not count as status changes. For existing sections, any different stored status (including NULL) counts once. Repeated identical requests report zero status changes, create no duplicate records, and refresh `last_checked_at` and `last_synced_at`. Courses upsert by `(subject, course_number)` and sections by `(term, crn)`. Existing section IDs and Watchlist references survive; watched and unwatched sections receive the same updates, including legacy rows with a NULL course link. A CRN already owned by another subject in that term returns `409`. Sections missing from a snapshot are retained; absence does not imply cancellation.
 
-All writes and the successful `DepartmentSyncs.last_synced_at` completion timestamp share one transaction. A MariaDB advisory lock named `njit:sync:<subject>:<term>` rejects overlapping API requests with `409` across backend instances and coordinates with existing callers of `src/sync_lock.py`. Row locks protect comparisons and updates; the advisory lock is released before returning the connection to the pool. Database failures roll back the transaction and return `503` through the backend error handler. Other responses include `400` for invalid input/JSON, `401` for invalid credentials, `413` for oversized JSON, and `415` for a non-JSON content type.
+All writes and the successful `DepartmentSyncs.last_synced_at` completion timestamp share one transaction. A MariaDB advisory lock named `njit:sync:<subject>:<term>` rejects overlapping API requests with `409` across backend instances. Row locks protect comparisons and updates; the advisory lock is released before returning the connection to the pool. Database failures roll back the transaction and return `503` through the backend error handler. Other responses include `400` for invalid input/JSON, `401` for invalid credentials, `413` for oversized JSON, and `415` for a non-JSON content type.
 
-Python department synchronization submits snapshots through this endpoint using
-`CHECKER_API_URL` and `CHECKER_API_TOKEN`; see the [integration notes](../README.md#banner-department-synchronization).
-The legacy polling loop still reads and writes individual sections directly.
-It releases its Python advisory lock before submitting a snapshot to Express.
-Direct writes that bypass `src/sync_lock.py` do not participate in that lock.
-The final monitoring migration remains follow-up work. No notifications are sent
-by this endpoint.
+`GET /api/internal/sync/targets` uses the same Bearer authentication and production
+HTTPS requirement as ingestion. It requires no request body or browser session.
+It returns, for example:
+
+```json
+{"targets":[{"subject":"IT","term":"202795"}]}
+```
+
+Targets merge distinct Watchlist subject/term pairs with the backend-only
+`CHECKER_MONITORING_TARGETS` JSON array (default `[]`). Duplicates collapse to one
+pair; NULL course links and catalog presence do not imply monitoring. An empty
+result is `{ "targets": [] }`. The endpoint does not write data. Explicit target
+configuration accepts the same subject and term formats as ingestion; malformed
+configuration prevents startup. See the [legacy monitoring upgrade notes](../README.md#banner-department-synchronization)
+before deploying against an existing database.
+
+Python polling and manual checks use HTTP only. Express owns all monitoring
+reads, section writes, status comparisons, and synchronization timestamps. The
+standalone legacy Python search helper retains SQL cache reads outside the
+polling architecture. No notifications are sent by these endpoints.
 
 ## Tests
 
@@ -94,6 +108,7 @@ Compose supplies these backend variables:
 | `APP_ENV` | `development` permits local HTTP; `production` requires HTTPS and Secure cookies |
 | `APP_ORIGIN` | Exact browser origin, without a trailing slash; defaults to `http://localhost:8080` |
 | `SESSION_SECRET` | Required signing secret, at least 32 bytes; changing it invalidates existing cookies |
-| `CHECKER_API_TOKEN` | Separate Bearer credential for internal snapshot ingestion; empty disables ingestion |
+| `CHECKER_API_TOKEN` | Bearer credential for internal ingestion and monitoring targets; empty disables both |
+| `CHECKER_MONITORING_TARGETS` | Backend-only JSON array of explicit `{subject, term}` pairs; defaults to `[]` |
 
 The `sessions` table must exist before startup; MariaDB initializes it automatically for new Compose database volumes. Existing volumes require any missing migrations to be applied manually. Express does not create the table. `API_SCHEME` configures Nginx's forwarded protocol, not TLS itself. Keep the local values from `.env.example` for the Compose demo.

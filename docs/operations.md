@@ -1,3 +1,9 @@
+**Legacy operations reference.** The current HTTP-only polling architecture,
+explicit monitoring configuration, and upgrade requirements are documented in
+[the root README](../README.md#banner-department-synchronization).
+The instructions below for `courses.json`, SQL-based monitoring, local state,
+and automatic Discord notifications no longer describe the running checker.
+
 **This documentation is currently outdated and will be updated once I finish implementing the full-stack, multi-container version of the application.**
 
 # Operations

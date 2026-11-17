@@ -1,4 +1,4 @@
-"""Check all configured courses once without changing automated state."""
+"""Fetch monitored department snapshots once without submitting updates."""
 
 from datetime import datetime
 

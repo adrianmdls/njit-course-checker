@@ -44,7 +44,7 @@ function validate(body) {
 
 async function synchronize(pool, snapshot) {
   const { subject, term, courses, sections } = snapshot;
-  // Match src/sync_lock.py so callers using that lock also serialize with this API.
+  // Serialize writes for this department/term across backend instances.
   const lockName = `njit:sync:${subject}:${term}`;
   const connection = await pool.getConnection();
   let locked = false;
@@ -100,9 +100,18 @@ async function synchronize(pool, snapshot) {
 
 module.exports = function createDepartmentSync(pool, token = process.env.CHECKER_API_TOKEN) {
   const router = express.Router();
+  let explicitTargets;
+  try {
+    explicitTargets = JSON.parse(process.env.CHECKER_MONITORING_TARGETS || '[]');
+    if (!Array.isArray(explicitTargets) || explicitTargets.some(target =>
+      !target || typeof target.subject !== 'string' || !/^[A-Z][A-Z0-9]{0,9}$/.test(target.subject) ||
+      typeof target.term !== 'string' || !/^\d{4}(10|50|90|95)$/.test(target.term))) throw new Error();
+  } catch {
+    throw new Error('CHECKER_MONITORING_TARGETS must be a JSON array of valid subject/term pairs');
+  }
   const digest = value => createHash('sha256').update(value).digest();
   const expected = token ? digest(token) : null;
-  router.post('/department', (req, res, next) => {
+  router.use(['/department', '/targets'], (req, res, next) => {
     res.set('Cache-Control', 'no-store');
     if (!expected) return res.status(503).json({ error: 'Department synchronization is not configured' });
     if (process.env.APP_ENV === 'production' && !req.secure) return res.status(400).json({ error: 'HTTPS required' });
@@ -110,6 +119,19 @@ module.exports = function createDepartmentSync(pool, token = process.env.CHECKER
     if (!timingSafeEqual(digest(match?.[1] || ''), expected) || !match) {
       return res.status(401).json({ error: 'Invalid checker credentials' });
     }
+    next();
+  });
+  router.get('/targets', async (req, res) => {
+    const [watched] = await pool.execute(`SELECT DISTINCT s.subject, s.term
+      FROM Sections s INNER JOIN Watchlists w ON w.section_id = s.id
+      ORDER BY s.subject, s.term`);
+    const targets = new Map();
+    for (const { subject, term } of [...watched, ...explicitTargets]) {
+      targets.set(`${subject}:${term}`, { subject, term });
+    }
+    res.json({ targets: [...targets.values()] });
+  });
+  router.post('/department', (req, res, next) => {
     if (!req.is('application/json')) return res.status(415).json({ error: 'JSON required' });
     next();
   }, express.json({ limit: '5mb' }), async (req, res, next) => {

@@ -19,6 +19,9 @@ async function serve(pool, secret = token) {
     const listening = app.listen(0, '127.0.0.1', error => error ? reject(error) : resolve(listening));
   });
   return {
+    get: (headers = {}) => fetch(`http://127.0.0.1:${server.address().port}/api/internal/sync/targets`, {
+      headers: { Authorization: `Bearer ${token}`, ...headers },
+    }),
     post: (body, headers = {}) => fetch(`http://127.0.0.1:${server.address().port}/api/internal/sync/department`, {
       method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...headers },
       body: typeof body === 'string' ? body : JSON.stringify(body),
@@ -32,6 +35,7 @@ test('authentication and validation reject requests before accessing the databas
   try {
     for (const authorization of ['', 'Basic abc', 'Bearer wrong', 'Bearer short', `Bearer ${token} extra`]) {
       assert.equal((await api.post('{', { Authorization: authorization })).status, 401);
+      assert.equal((await api.get({ Authorization: authorization })).status, 401);
     }
     assert.equal((await api.post(snapshot(), { 'Content-Type': 'text/plain' })).status, 415);
     assert.equal((await api.post('{')).status, 400);
@@ -51,7 +55,10 @@ test('authentication and validation reject requests before accessing the databas
     assert.equal((await api.post({})).status, 400);
   } finally { await api.close(); }
   const disabled = await serve({}, '');
-  try { assert.equal((await disabled.post(snapshot())).status, 503); }
+  try {
+    assert.equal((await disabled.post(snapshot())).status, 503);
+    assert.equal((await disabled.get()).status, 503);
+  }
   finally { await disabled.close(); }
 });
 
@@ -59,11 +66,28 @@ test('production requires HTTPS for machine authentication', async () => {
   const previous = process.env.APP_ENV;
   process.env.APP_ENV = 'production';
   const api = await serve({});
-  try { assert.equal((await api.post(snapshot())).status, 400); }
+  try {
+    assert.equal((await api.post(snapshot())).status, 400);
+    assert.equal((await api.get()).status, 400);
+  }
   finally {
     if (previous === undefined) delete process.env.APP_ENV;
     else process.env.APP_ENV = previous;
     await api.close();
+  }
+});
+
+test('invalid explicit monitoring configuration fails without exposing its value', () => {
+  const previous = process.env.CHECKER_MONITORING_TARGETS;
+  try {
+    for (const value of ['private-invalid-value', '{}', '[null]', '[{"subject":"IT","term":"202711"}]']) {
+      process.env.CHECKER_MONITORING_TARGETS = value;
+      assert.throws(() => createSync({}, token), error =>
+        error.message === 'CHECKER_MONITORING_TARGETS must be a JSON array of valid subject/term pairs');
+    }
+  } finally {
+    if (previous === undefined) delete process.env.CHECKER_MONITORING_TARGETS;
+    else process.env.CHECKER_MONITORING_TARGETS = previous;
   }
 });
 
@@ -77,6 +101,7 @@ test('MariaDB upserts, watchlists, rollback, idempotency, Winter terms and locki
       // This suite owns a disposable database. Never point it at a project database.
       await pool.query(await readFile(`${__dirname}/../../database/init/01-schema.sql`, 'utf8'));
       api = await serve(pool);
+      assert.deepEqual(await (await api.get()).json(), { targets: [] });
       const body = snapshot({ sections: [section(), section({ crn: '12346', section: '002' }), section()] });
       let response = await api.post(body);
       assert.equal(response.status, 200);
@@ -84,6 +109,9 @@ test('MariaDB upserts, watchlists, rollback, idempotency, Winter terms and locki
       const [original] = await pool.query('SELECT id, crn FROM Sections ORDER BY crn');
       await pool.execute("INSERT INTO Users (username,email,password_hash) VALUES ('watcher','watcher@example.invalid','unused')");
       await pool.execute('INSERT INTO Watchlists (user_id,section_id) VALUES (1,?)', [original[0].id]);
+      await pool.execute('INSERT INTO Watchlists (user_id,section_id) VALUES (1,?)', [original[1].id]);
+      assert.deepEqual(await (await api.get()).json(), { targets: [{ subject: 'CS', term: '202710' }] });
+      await pool.execute('DELETE FROM Watchlists WHERE section_id = ?', [original[1].id]);
       await pool.query("UPDATE DepartmentSyncs SET last_synced_at = '2000-01-01 00:00:00'");
       response = await api.post(body);
       assert.equal(response.status, 200);
@@ -162,6 +190,29 @@ test('MariaDB upserts, watchlists, rollback, idempotency, Winter terms and locki
         const [[course]] = await pool.execute(
           'SELECT title FROM Courses WHERE subject = ? AND course_number = ?', ['IT', number]);
         assert.equal(course.title, expected, title);
+      }
+      await pool.execute('INSERT INTO Sections (subject,term,crn) VALUES (?,?,?)', ['ECE', '202795', '98765']);
+      const previousTargets = process.env.CHECKER_MONITORING_TARGETS;
+      let explicitApi;
+      try {
+        process.env.CHECKER_MONITORING_TARGETS = JSON.stringify([
+          { subject: 'IT', term: '202710' }, { subject: 'CS', term: '202710' },
+        ]);
+        explicitApi = await serve(pool);
+        const response = await explicitApi.get();
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { targets: [
+          { subject: 'CS', term: '202710' }, { subject: 'IT', term: '202710' },
+        ] }, 'watchlists and explicit targets merge; unrelated NULL course rows are ignored');
+        await pool.execute('DELETE FROM Watchlists WHERE user_id = ?', [1]);
+        assert.deepEqual(await (await explicitApi.get()).json(), { targets: [
+          { subject: 'IT', term: '202710' }, { subject: 'CS', term: '202710' },
+        ] }, 'explicit targets persist after ingestion creates course links');
+        assert.deepEqual(await (await api.get()).json(), { targets: [] });
+      } finally {
+        if (explicitApi) await explicitApi.close();
+        if (previousTargets === undefined) delete process.env.CHECKER_MONITORING_TARGETS;
+        else process.env.CHECKER_MONITORING_TARGETS = previousTargets;
       }
     } finally {
       if (api) await api.close();

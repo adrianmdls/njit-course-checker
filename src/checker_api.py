@@ -5,17 +5,17 @@ import os
 import requests
 
 
-def submit_department_snapshot(subject, term, sections):
-    """Send one snapshot; callers must not hold a department database lock."""
+def _request(method, path, payload=None):
+    """Call an internal endpoint without exposing credentials in errors."""
     api_url = os.getenv("CHECKER_API_URL", "").rstrip("/")
     token = os.getenv("CHECKER_API_TOKEN", "")
     if not api_url or not token:
         raise ValueError("Set CHECKER_API_URL and CHECKER_API_TOKEN for department synchronization.")
 
     try:
-        response = requests.post(
-            f"{api_url}/api/internal/sync/department",
-            json={"subject": subject, "term": term, "sections": sections},
+        response = requests.request(
+            method, f"{api_url}{path}",
+            json=payload,
             headers={"Authorization": f"Bearer {token}"},
             timeout=(5, 30),
             allow_redirects=False,
@@ -41,3 +41,27 @@ def submit_department_snapshot(subject, term, sections):
         return response.json()
     except ValueError:
         raise requests.RequestException("Department synchronization backend returned invalid JSON.") from None
+
+
+def submit_department_snapshot(subject, term, sections):
+    """Send one snapshot; callers must not hold a department database lock."""
+    return _request("POST", "/api/internal/sync/department", {
+        "subject": subject, "term": term, "sections": sections,
+    })
+
+
+def get_monitoring_targets():
+    """Retrieve unique monitored subject/term pairs from Express."""
+    result = _request("GET", "/api/internal/sync/targets")
+    try:
+        targets = result["targets"]
+        if not isinstance(targets, list) or any(
+            not isinstance(target, dict)
+            or not isinstance(target.get("subject"), str)
+            or not isinstance(target.get("term"), str)
+            for target in targets
+        ):
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        raise requests.RequestException("Monitoring backend returned invalid targets.") from None
+    return targets
