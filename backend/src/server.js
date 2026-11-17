@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('./db');
 const createAuth = require('./auth');
+const createDepartmentSync = require('./department-sync');
 
 async function main() {
   const app = express();
@@ -9,6 +10,7 @@ async function main() {
   app.set('trust proxy', 1);
   const auth = await createAuth(pool);
   app.use('/api/auth', auth.router);
+  app.use('/api/internal/sync', createDepartmentSync(pool));
 
   app.get('/api/health', async (req, res) => {
     try {
