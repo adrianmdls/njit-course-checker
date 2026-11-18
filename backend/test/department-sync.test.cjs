@@ -19,7 +19,7 @@ async function serve(pool, secret = token) {
     const listening = app.listen(0, '127.0.0.1', error => error ? reject(error) : resolve(listening));
   });
   return {
-    get: (headers = {}) => fetch(`http://127.0.0.1:${server.address().port}/api/internal/sync/targets`, {
+    get: (headers = {}, query = '') => fetch(`http://127.0.0.1:${server.address().port}/api/internal/sync/targets${query}`, {
       headers: { Authorization: `Bearer ${token}`, ...headers },
     }),
     post: (body, headers = {}) => fetch(`http://127.0.0.1:${server.address().port}/api/internal/sync/department`, {
@@ -100,6 +100,34 @@ test('validation diagnostics identify only fixed fields, row indexes and reason 
     assert.equal(response.status, 400);
     assert.deepEqual((await response.json()).validation, { field: 'title', row_index: 1, reason: 'conflicting_title' });
   } finally { await api.close(); }
+});
+
+test('watched-only targets exclude explicit configuration and validate query parameters', async () => {
+  const previous = process.env.CHECKER_MONITORING_TARGETS;
+  process.env.CHECKER_MONITORING_TARGETS = '[{"subject":"IT","term":"202710"}]';
+  const calls = [];
+  const api = await serve({ async execute(sql) {
+    calls.push(sql);
+    return [[{ subject: 'CS', term: '202710' }, { subject: 'CS', term: '202710' }]];
+  } });
+  try {
+    assert.deepEqual(await (await api.get({}, '?watched_only=true')).json(), {
+      targets: [{ subject: 'CS', term: '202710' }],
+    });
+    assert.deepEqual(await (await api.get()).json(), {
+      targets: [{ subject: 'CS', term: '202710' }, { subject: 'IT', term: '202710' }],
+    });
+    assert.match(calls[0], /INNER JOIN Watchlists/);
+    const before = calls.length;
+    for (const query of ['?watched_only=false', '?watched_only=true&watched_only=true', '?unexpected=1']) {
+      assert.equal((await api.get({}, query)).status, 400);
+    }
+    assert.equal(calls.length, before);
+  } finally {
+    await api.close();
+    if (previous === undefined) delete process.env.CHECKER_MONITORING_TARGETS;
+    else process.env.CHECKER_MONITORING_TARGETS = previous;
+  }
 });
 
 test('production requires HTTPS for machine authentication', async () => {

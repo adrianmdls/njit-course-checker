@@ -1,8 +1,12 @@
 # React frontend
 
-React provides account pages, authenticated course search, and a local demo
-watchlist. Search reads `/api/courses`; adding a result to the watchlist does not
-persist it or enable backend monitoring. See the [root guide](../README.md) for
+React provides account pages, authenticated course search, and persistent
+per-user watchlists. Search reads `/api/courses`; Add and Remove use
+`/api/watchlist`, and the dashboard reloads stored watches on mount/tab changes.
+Section IDs distinguish matching CRNs in different terms. Loading, retryable
+errors and pending controls prevent duplicate clicks. Status comes from the
+stored section, including Closed/Cancelled/unknown states. Notification controls
+are not implemented. See the [root guide](../README.md) for
 Compose setup and [backend guide](../backend/README.md) for the API contract.
 
 ## Development
@@ -20,7 +24,7 @@ npm run dev -- --host localhost --port 5173 --strictPort
 
 Open `http://localhost:5173`. Vite forwards `/api/` to Nginx at
 `http://localhost:8080`, which proxies to Express. The backend's `APP_ORIGIN`
-must match the browser origin exactly for registration, login, and logout;
+must match the browser origin exactly for registration, login, logout, and watchlist changes;
 keep the hostname and port consistent. When returning to the normal Compose
 UI on port 8080, recreate the backend with the root `.env` origin again:
 `docker compose up -d backend` from the repository root.

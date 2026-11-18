@@ -33,14 +33,15 @@ module.exports = async function createAuth(pool) {
     next();
   });
   // Same-origin JSON API: require both a custom header and an exact Origin on mutations.
-  router.use((req, res, next) => {
+  function requireMutation(req, res, next) {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
     if (req.get('Origin') !== origin || req.get('X-Requested-With') !== 'NJIT-Course-Checker') {
       return res.status(403).json({ error: 'Invalid request origin' });
     }
     if (!req.is('application/json')) return res.status(415).json({ error: 'JSON required' });
     next();
-  });
+  }
+  router.use(requireMutation);
   const limiter = (limit, windowMs) => rateLimit({ windowMs, limit, standardHeaders: 'draft-8',
     legacyHeaders: false, message: { error: 'Too many attempts; try again later' } });
   // Run before session access and expensive password hashing.
@@ -113,7 +114,7 @@ module.exports = async function createAuth(pool) {
     res.sendStatus(204);
   });
   router.get('/me', requireAuth, (req, res) => res.json({ user: req.user }));
-  return { router, sessionMiddleware, requireAuth, async close() {
+  return { router, sessionMiddleware, requireAuth, requireMutation, async close() {
     clearInterval(cleanup);
     await store.close();
   } };

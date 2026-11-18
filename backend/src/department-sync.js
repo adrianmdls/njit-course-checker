@@ -128,11 +128,15 @@ module.exports = function createDepartmentSync(pool, token = process.env.CHECKER
     next();
   });
   router.get('/targets', async (req, res) => {
+    if (Object.keys(req.query).some(key => key !== 'watched_only') ||
+        (req.query.watched_only !== undefined && req.query.watched_only !== 'true')) {
+      return res.status(400).json({ error: 'Invalid targets parameters' });
+    }
     const [watched] = await pool.execute(`SELECT DISTINCT s.subject, s.term
       FROM Sections s INNER JOIN Watchlists w ON w.section_id = s.id
       ORDER BY s.subject, s.term`);
     const targets = new Map();
-    for (const { subject, term } of [...watched, ...explicitTargets]) {
+    for (const { subject, term } of [...watched, ...(req.query.watched_only ? [] : explicitTargets)]) {
       targets.set(`${subject}:${term}`, { subject, term });
     }
     res.json({ targets: [...targets.values()] });

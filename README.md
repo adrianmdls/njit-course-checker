@@ -15,10 +15,13 @@ React searches existing MariaDB records through `GET /api/courses`, using the
 same session cookie as login. Search never fetches Banner or starts a sync.
 Unsynchronized department/term combinations return no results.
 
-The watchlist still uses local React state initialized with mock records. Add,
-remove, and notification toggles are demo controls; they do not persist or update
-backend Watchlists. Configure one or two checker terms to populate search
-results naturally through department rotation. Automatic notifications are not implemented.
+Watchlists persist in MariaDB for the authenticated user. Search results show
+whether each database section is already watched; Add and Remove use the session-
+authenticated `/api/watchlist` API. Watched subject/term pairs enter the existing
+priority synchronization targets and leave when their last watch is removed.
+Configure one or two checker terms to populate search results naturally through
+department rotation. Automatic notifications are not implemented.
+See [Phase 3 watchlists](docs/phase-3-watchlists.md) for the API and verification.
 
 ## Banner department synchronization
 

@@ -77,6 +77,44 @@ final tie-breaker and apply the requested direction to every tie-breaker.
 Missing, invalid, or expired sessions return `401`; database failures return a
 sanitized `503`. Searches never request data from Banner.
 
+## Persistent watchlists
+
+All three routes reuse the existing session middleware and user lookup. Checker
+Bearer tokens do not authenticate these routes. Responses use `Cache-Control:
+no-store`; production requires HTTPS through the trusted proxy.
+
+| Method | Path | Behavior |
+|---|---|---|
+| GET | `/api/watchlist` | `200 {"sections": [...]}` for the current user; empty arrays are valid. |
+| POST | `/api/watchlist` | JSON `{"section_id": 123}`; `201 {"section_id": 123}`, duplicate `409`, nonexistent section `404`. |
+| DELETE | `/api/watchlist/:sectionId` | `204` on removal, `404` if the current user has no such watch. Send an empty JSON object. |
+
+Mutations require an exact `Origin`, `X-Requested-With: NJIT-Course-Checker` and
+`Content-Type: application/json`, reusing auth protections. Invalid origins or
+headers return `403`, non-JSON mutations `415`, malformed JSON `400`, and JSON
+bodies over 1 KiB `413`. Authentication failures return `401` before watchlist
+queries. Invalid IDs/body fields or any query parameters return `400`.
+
+POST section IDs must be JSON integers from 1 to 4294967295. DELETE path IDs use
+canonical positive decimal digits in the same range. User IDs are never accepted;
+unknown fields, including `user_id`, are rejected. All database values are bound
+parameters, and deletion always includes the authenticated owner. A `404` does
+not reveal whether another user's watch exists. Database failures are sanitized
+by the existing server error handler.
+
+List rows contain `section_id`, `course`, `title`, `subject`, `crn`, `term`,
+`section`, `max`, `now`, `status` and UTC ISO `last_checked_at`. Nullable values
+stay null. Status is stored status rather than an inference from available seats.
+Legacy sections without a course link remain visible using their saved label or
+subject; no placeholder Course rows are created.
+
+The existing unique `(user_id, section_id)` key prevents concurrent duplicates.
+Insertion checks section existence in the same SQL statement. No schema changes
+are required. The watched-only internal targets endpoint immediately reflects
+committed additions/removals across all users. Removing one user's watch does
+not demote a pair still watched elsewhere. Scheduler term/allowlist filtering and
+polling times are unchanged. See [Phase 3 notes](../docs/phase-3-watchlists.md).
+
 ## Internal department synchronization
 
 Set a separate, random `CHECKER_API_TOKEN` (generate with `openssl rand -hex 32`). Compose passes it to the backend. An unset/empty token disables ingestion with `503`, without disabling the rest of the backend. Recreate the backend container after changing the token. Send `Authorization: Bearer <CHECKER_API_TOKEN>` and `Content-Type: application/json`. Production requires HTTPS through the trusted proxy. Keep the token out of browser code, URLs, and logs.
@@ -125,7 +163,12 @@ It returns, for example:
 {"targets":[{"subject":"IT","term":"202795"}]}
 ```
 
-Targets merge distinct Watchlist subject/term pairs with the backend-only
+With `?watched_only=true`, the same endpoint returns only distinct database
+Watchlist subject/term pairs. The scheduled checker uses this filter, then limits
+pairs to its configured terms and NJIT allowlist. Other query values, duplicate
+parameters and unknown keys return `400` before accessing the database.
+
+Without a query, targets retain the backwards-compatible merge of distinct Watchlist subject/term pairs with the backend-only
 `CHECKER_MONITORING_TARGETS` JSON array (default `[]`). Duplicates collapse to one
 pair; NULL course links and catalog presence do not imply monitoring. An empty
 result is `{ "targets": [] }`. The endpoint does not write data. Explicit target

@@ -26,7 +26,10 @@ unless you intend to delete the database. The current checker does not write
 Regular synchronization rotates one NJIT subject at :00 and :30 for the one or
 two terms in `CHECKER_TERMS`. Priority synchronization reads actual Watchlists
 at :05/:15/:25/:35/:45/:55, filtered to the same configured terms and allowlist.
-The browser demo watchlist does not update database Watchlists. Backend explicit
+Browser Add/Remove now persist the authenticated user's database Watchlists.
+The existing watched-only endpoint promotes/demotes distinct pairs across all
+users; the scheduler retains its configured-term and NJIT allowlist filters.
+Backend explicit
 `CHECKER_MONITORING_TARGETS` remains available to legacy/manual callers but does
 not grant scheduled priority. `CHECK_INTERVAL` is retired.
 
@@ -86,8 +89,8 @@ automatically active targets.
 
 ## Notifications
 
-Automatic Discord and email notifications are inactive. The local dashboard
-notification toggle is a demo control. The retained Discord utility can still
+Automatic Discord and email notifications are inactive. The dashboard provides
+no notification toggle. The retained Discord utility can still
 send a manual message when `DISCORD_WEBHOOK_URL` is configured in the checker:
 
 ```sh

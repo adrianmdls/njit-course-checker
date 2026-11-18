@@ -9,7 +9,7 @@ function termLabel(code) {
   return season ? `${season} ${year}${code.endsWith('95') ? `–${year + 1}` : ''}` : code
 }
 
-export default function SearchCourses({ courses, onAdd }) {
+export default function SearchCourses({ courses, onAdd, watchlistReady, pendingId }) {
   const { refresh } = useAuth()
   const [term, setTerm] = useState('')
   const [options, setOptions] = useState(null)
@@ -253,7 +253,7 @@ export default function SearchCourses({ courses, onAdd }) {
                     : section.status === 'CLOSED' ? 'Closed'
                       : section.status === 'CANCELLED' ? 'Cancelled' : 'Unknown'
                   const isWatched = courses.some(
-                    (course) => course.crn === section.crn
+                    (course) => course.section_id === section.id
                   )
 
                   return (
@@ -279,16 +279,16 @@ export default function SearchCourses({ courses, onAdd }) {
                       <td className="px-5 py-3">
                         <button
                           type="button"
-                          disabled={isWatched}
+                          disabled={isWatched || !watchlistReady || pendingId !== null}
                           onClick={() => onAdd(section)}
-                          className={`flex items-center gap-2 rounded-md px-3 py-2 font-semibold ${
+                          className={`flex items-center gap-2 rounded-md px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${
                             isWatched
                               ? 'cursor-not-allowed bg-slate-100 text-slate-500'
                               : 'cursor-pointer bg-red-100 text-[#D60000] hover:bg-red-200'
                           }`}
                         >
                           {isWatched ? <Check size={18} /> : <BookmarkPlus size={18} />}
-                          {isWatched ? 'Added' : 'Add'}
+                          {isWatched ? 'Added' : pendingId === section.id ? 'Adding…' : 'Add'}
                         </button>
                       </td>
                     </tr>

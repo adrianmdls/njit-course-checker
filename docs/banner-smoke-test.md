@@ -47,7 +47,10 @@ and unscheduled courses, authentication and read-only behavior.
 to its executable on systems other than macOS. The dependency-free Chrome
 DevTools helper does **not** mock fetch: it logs in via React, inspects actual
 search parameters, renders synchronized records and statuses, tests pagination,
-Add, empty results, and expires the actual MariaDB session to verify redirection.
+persistent Add/reload/Remove, duplicate clicks, retryable watchlist failures,
+empty results, and expires the actual MariaDB session to verify redirection.
+Watchlist changes in the browser test are removed before its final snapshot
+comparison; existing fixture users' watches remain untouched.
 One synchronized row is explicitly changed to NULL capacity/enrollment to test
 legacy nullable values, which the normalized ingestion contract cannot supply.
 Browser checks also capture an unfiltered Spring 2027 request, HTTP status and
