@@ -110,23 +110,5 @@ class CheckerTests(unittest.TestCase):
         self.assertEqual((errors, term), (0, "202795"))
         submit.assert_not_called()
 
-    def test_interval_validation_is_preserved(self):
-        for interval in ("0", "-1", "invalid"):
-            with self.subTest(interval=interval), patch.dict(os.environ, {"CHECK_INTERVAL": interval}), \
-                 patch.object(checker, "setup_logging"), patch("builtins.print"), self.assertLogs(checker.logger):
-                self.assertEqual(checker.main(), 1)
-
-    def test_interval_waits_after_completed_cycle(self):
-        for environment, expected in (({}, 600), ({"CHECK_INTERVAL": "15"}, 15)):
-            with self.subTest(environment=environment), patch.dict(os.environ, environment, clear=True), \
-                 patch.object(checker, "setup_logging"), \
-                 patch.object(checker, "check_once", return_value=(["No departments"], 0, None)) as check, \
-                 patch.object(checker, "print_results"), patch("builtins.print"), \
-                 patch.object(checker.time, "sleep", side_effect=KeyboardInterrupt) as sleep:
-                self.assertEqual(checker.main(), 0)
-            check.assert_called_once_with()
-            sleep.assert_called_once_with(expected)
-
-
 if __name__ == "__main__":
     unittest.main()

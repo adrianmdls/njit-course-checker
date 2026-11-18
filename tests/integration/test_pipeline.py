@@ -217,6 +217,22 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result["errors"], 2, result)
         self.assertEqual(self.snapshot(), before)
 
+    def test_scheduler_regular_syncs_two_terms_and_does_not_treat_explicit_targets_as_watched(self):
+        priority = self.probe("scheduled", departments=["IT"], terms=["202710", "202795"], kind="watched")
+        self.assertEqual(priority["banner_calls"], [])  # backend has explicit IT / 202795
+        regular = self.probe("scheduled", departments=["IT", "CS"], terms=["202710", "202795"])
+        self.assertEqual(regular, {"banner_calls": [["IT", "202710"], ["IT", "202795"]], "next_subject": "CS"})
+        self.assertEqual(self.sql("SELECT subject,term FROM DepartmentSyncs ORDER BY term"),
+                         [{"subject": "IT", "term": "202710"}, {"subject": "IT", "term": "202795"}])
+
+    def test_scheduler_excludes_watched_pair_from_regular_and_syncs_it_in_priority_slot(self):
+        self.seed_watchlists()
+        regular = self.probe("scheduled", departments=["CS", "IT"], terms=["202710", "202795"])
+        self.assertEqual(regular["banner_calls"], [["CS", "202795"]])
+        priority = self.probe("scheduled", departments=["CS", "IT"], terms=["202710", "202795"], kind="watched")
+        self.assertEqual(priority["banner_calls"], [["CS", "202710"], ["IT", "202795"]])
+        self.assertEqual(len(self.snapshot()["Watchlists"]), 4)
+
     def test_empty_sync_retains_rows_ids_watchlists_and_section_timestamps(self):
         self.seed_watchlists()
         self.assertEqual(self.probe("poll")["errors"], 0)
@@ -294,7 +310,7 @@ class PipelineTests(unittest.TestCase):
     def test_application_compose_environment(self):
         env = dict(os.environ, DB_PASSWORD="fixture-only-db", DB_ROOT_PASSWORD="fixture-only-root",
                    SESSION_SECRET="fixture-only-session-secret-0123456789", CHECKER_API_TOKEN="fixture-only-token",
-                   CHECKER_API_URL="http://backend:3000", CHECKER_MONITORING_TARGETS='[{"subject":"IT","term":"202795"}]')
+                   CHECKER_API_URL="http://backend:3000", CHECKER_TERMS='["202710"]', CHECKER_MONITORING_TARGETS='[{"subject":"IT","term":"202795"}]')
         result = subprocess.run(["docker", "compose", "--env-file", os.devnull, "-f", str(ROOT / "compose.yaml"),
                                  "config", "--format", "json"], env=env, check=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)

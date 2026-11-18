@@ -83,9 +83,9 @@ def submit_department_snapshot(subject, term, sections):
     })
 
 
-def get_monitoring_targets():
+def get_monitoring_targets(watched_only=False):
     """Retrieve unique monitored subject/term pairs from Express."""
-    result = _request("GET", "/api/internal/sync/targets")
+    result = _request("GET", "/api/internal/sync/targets" + ("?watched_only=true" if watched_only else ""))
     try:
         targets = result["targets"]
         if not isinstance(targets, list) or any(

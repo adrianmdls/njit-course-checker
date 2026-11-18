@@ -52,7 +52,8 @@ services:
         condition: service_healthy
 
     environment:
-      CHECK_INTERVAL: ${CHECK_INTERVAL:-600}
+      CHECKER_TERMS: ${CHECKER_TERMS:?Set CHECKER_TERMS to a JSON array of one or two terms}
+      BANNER_REQUEST_DELAY: ${BANNER_REQUEST_DELAY:-5}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       CHECKER_API_URL: ${CHECKER_API_URL:-http://backend:3000}
       CHECKER_API_TOKEN: ${CHECKER_API_TOKEN:-}

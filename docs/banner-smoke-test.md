@@ -205,7 +205,8 @@ On the checker VM, create a private `checker.env` containing only:
 ```dotenv
 CHECKER_API_URL=https://your-backend.example.edu
 CHECKER_API_TOKEN=<same secret as the backend>
-CHECK_INTERVAL=600
+CHECKER_TERMS='["202690","202710"]'
+BANNER_REQUEST_DELAY=5
 TZ=America/New_York
 ```
 

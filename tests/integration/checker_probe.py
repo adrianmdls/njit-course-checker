@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import socket
 import sys
+import tempfile
 from unittest.mock import patch
 
 
@@ -105,6 +106,27 @@ def run(options):
                 with contextlib.redirect_stdout(output):
                     code = manual_check.main()
                 return {"exit_code": code, "output": output.getvalue(), "banner_calls": calls}
+            if mode == "scheduled":
+                class Clock:
+                    seconds = 0
+                    def time(self):
+                        return self.seconds
+                    def monotonic(self):
+                        return self.seconds
+                    def wait(self, seconds):
+                        self.seconds += seconds
+                        return False
+                clock = Clock()
+                with tempfile.TemporaryDirectory() as directory:
+                    departments = options["departments"]
+                    cursor = checker.RotationCursor(Path(directory) / "rotation.json", departments)
+                    scheduled = checker.ScheduledChecker(options["terms"], departments, cursor,
+                                                          clock=clock, wait=clock.wait)
+                    kind = options.get("kind", "regular")
+                    slot = 300 if kind == "watched" else 0
+                    clock.seconds = slot
+                    scheduled.run_slot(kind, slot)
+                    return {"banner_calls": calls, "next_subject": cursor.next_subject}
             if mode != "poll":
                 raise ValueError("Unknown probe mode")
             results, errors, term = checker.check_once()

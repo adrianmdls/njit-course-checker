@@ -116,6 +116,12 @@ class CheckerAPITests(unittest.TestCase):
             timeout=(5, 30), allow_redirects=False,
         )
 
+    def test_watched_only_uses_existing_endpoint_with_explicit_filter(self):
+        self.response.json.return_value = {"targets": []}
+        self.assertEqual(get_monitoring_targets(watched_only=True), [])
+        self.assertEqual(self.post.call_args.args[:2],
+                         ("GET", "http://backend:3000/api/internal/sync/targets?watched_only=true"))
+
     def test_invalid_monitoring_response(self):
         for body in (None, {}, {"targets": None}, {"targets": [{}]}):
             with self.subTest(body=body):
