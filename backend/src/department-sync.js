@@ -71,17 +71,26 @@ async function synchronize(pool, snapshot) {
     }
     for (const section of sections) {
       const [[existing]] = await connection.execute(
-        'SELECT subject, status FROM Sections WHERE term = ? AND crn = ? FOR UPDATE', [term, section.crn]);
+        'SELECT subject, status, is_active FROM Sections WHERE term = ? AND crn = ? FOR UPDATE', [term, section.crn]);
       if (existing && existing.subject !== subject) throw fail(409, 'CRN belongs to another subject');
-      if (existing && existing.status !== section.status) statusChanges++;
+      // A returning section establishes a new baseline, not an availability transition.
+      if (existing && Number(existing.is_active) === 1 && existing.status !== section.status) statusChanges++;
       await connection.execute(`INSERT INTO Sections
-        (subject, term, crn, section_number, capacity, enrolled, status, course_id, last_checked_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        (subject, term, crn, section_number, capacity, enrolled, status, course_id, last_checked_at, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, TRUE)
         ON DUPLICATE KEY UPDATE section_number = VALUES(section_number), capacity = VALUES(capacity),
           enrolled = VALUES(enrolled), status = VALUES(status), course_id = VALUES(course_id),
-          last_checked_at = CURRENT_TIMESTAMP`,
+          last_checked_at = CURRENT_TIMESTAMP, is_active = TRUE`,
       [subject, term, section.crn, section.section_number, section.capacity, section.enrolled,
         section.status, courseIds.get(section.courseNumber)]);
+    }
+    // Only complete nonempty snapshots reconcile absence. Empty-result semantics
+    // are not yet verified against Banner, so [] preserves all section activity.
+    if (sections.length) {
+      await connection.execute(`UPDATE Sections SET is_active = FALSE
+        WHERE subject = ? AND term = ? AND is_active = TRUE
+          AND crn NOT IN (${sections.map(() => '?').join(',')})`,
+      [subject, term, ...sections.map(section => section.crn)]);
     }
     await connection.execute(`INSERT INTO DepartmentSyncs (subject, term, last_synced_at)
       VALUES (?, ?, CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE last_synced_at = CURRENT_TIMESTAMP`, [subject, term]);

@@ -19,6 +19,10 @@ services:
   backend:
     image: njit-banner-integration-backend
     build: ../../backend
+    # Reuse the existing F2 tests/migration in this disposable stack only.
+    volumes:
+      - ../../backend/test:/app/test:ro
+      - ../../database:/database:ro
     environment:
       APP_ENV: development
       APP_ORIGIN: http://127.0.0.1:${INTEGRATION_HTTP_PORT:?Set a disposable frontend port}

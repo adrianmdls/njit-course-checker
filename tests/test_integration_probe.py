@@ -1,0 +1,95 @@
+"""Offline checks of disposable-probe authentication; no Docker, HTTP or SQL."""
+import importlib.util
+import json
+import os
+from pathlib import Path
+import sys
+import unittest
+from unittest.mock import Mock, patch
+
+import requests
+
+
+def load_probe_module(name, filename):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).parent / "integration" / filename)
+    module = importlib.util.module_from_spec(spec)
+    # checker_probe installs a SQL import guard for its separate container process.
+    # Keep that guard and its /workspace path out of this unit-test process.
+    with patch.object(sys, "meta_path", list(sys.meta_path)), patch.object(sys, "path", list(sys.path)):
+        spec.loader.exec_module(module)
+    return module
+
+
+pipeline = load_probe_module("probe_pipeline", "test_pipeline.py")
+probe = load_probe_module("checker_probe_auth", "checker_probe.py")
+
+
+class ProbeAuthenticationTests(unittest.TestCase):
+    def make_pipeline(self):
+        case = pipeline.PipelineTests("test_configured_and_watched_targets_merge")
+        case.sql = Mock()
+        case.setUp()
+        payloads = []
+
+        def command(*args, input):
+            payload = json.loads(input)
+            payloads.append(payload)
+            return json.dumps({"cookies": {"njit.sid": "signed-test-cookie"}}
+                              if payload["mode"] == "authenticate" else {"ok": True})
+
+        case.command = Mock(side_effect=command)
+        return case, payloads
+
+    def test_repeated_authenticated_reads_share_one_real_authentication_setup(self):
+        case, payloads = self.make_pipeline()
+        for mode in ("search", "options", "watchlist", "search", "watchlist", "search"):
+            case.probe(mode)
+        self.assertEqual([p["mode"] for p in payloads].count("authenticate"), 1)
+        for payload in payloads[1:]:
+            self.assertEqual(payload["session_cookies"], {"njit.sid": "signed-test-cookie"})
+
+    def test_unauthenticated_reads_never_authenticate_or_reuse_the_cached_cookie(self):
+        case, payloads = self.make_pipeline()
+        case.probe("search")
+        for mode in ("search", "options", "watchlist"):
+            case.probe(mode, authenticated=False)
+            self.assertNotIn("session_cookies", payloads[-1])
+        self.assertEqual([p["mode"] for p in payloads].count("authenticate"), 1)
+
+    def test_database_reset_also_discards_the_session_cache(self):
+        case, payloads = self.make_pipeline()
+        case.probe("search")
+        case.setUp()
+        case.probe("search")
+        self.assertEqual([p["mode"] for p in payloads].count("authenticate"), 2)
+
+    def test_authenticate_uses_real_routes_and_returns_the_session_cookie(self):
+        with patch.dict(os.environ, {"APP_ORIGIN": "http://test.invalid"}, clear=True), \
+             patch.object(probe.requests, "Session") as session_factory:
+            session = session_factory.return_value.__enter__.return_value
+            session.cookies = requests.cookies.RequestsCookieJar()
+            session.cookies.set("njit.sid", "signed-test-cookie")
+            registered, logged_in = Mock(status_code=201), Mock(status_code=200)
+            session.post.side_effect = [registered, logged_in]
+            self.assertEqual(probe.run({"mode": "authenticate"}),
+                             {"cookies": {"njit.sid": "signed-test-cookie"}})
+            self.assertEqual([call.args[0] for call in session.post.call_args_list],
+                             ["http://frontend/api/auth/register", "http://frontend/api/auth/login"])
+            logged_in.raise_for_status.assert_called_once_with()
+            session.get.assert_not_called()
+
+    def test_read_probe_uses_the_cookie_without_repeating_registration_or_login(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(probe.requests, "Session") as session_factory:
+            session = session_factory.return_value.__enter__.return_value
+            session.cookies = requests.cookies.RequestsCookieJar()
+            session.get.return_value = Mock(status_code=200)
+            session.get.return_value.json.return_value = {"sections": []}
+            self.assertEqual(probe.run({"mode": "watchlist", "session_cookies": {"njit.sid": "signed-test-cookie"}}),
+                             {"status": 200, "body": {"sections": []}})
+            self.assertEqual(session.cookies.get("njit.sid"), "signed-test-cookie")
+            session.post.assert_not_called()
+            session.get.assert_called_once_with("http://frontend/api/watchlist", timeout=10)
+
+
+if __name__ == "__main__":
+    unittest.main()

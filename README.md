@@ -13,7 +13,10 @@ The frontend sends `/api/` requests through Nginx to Express, which connects to 
 
 React searches existing MariaDB records through `GET /api/courses`, using the
 same session cookie as login. Search never fetches Banner or starts a sync.
-Unsynchronized department/term combinations return no results.
+Unsynchronized department/term combinations return no results. Search and catalog
+options exclude inactive sections; existing watches retain them as Unavailable.
+See [section activity and migration instructions](docs/section-activity.md) before
+deploying against an existing database volume. Empty snapshots preserve activity.
 
 Watchlists persist in MariaDB for the authenticated user. Search results show
 whether each database section is already watched; Add and Remove use the session-

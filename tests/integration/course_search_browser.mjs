@@ -2,7 +2,7 @@
 // Chrome/Chromium and Docker are required; no browser framework is installed.
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -31,11 +31,15 @@ try {
   const pending = new Map()
   const requests = []
   const responses = []
+  const watchlistRequests = []
   const errors = []
   ws.onmessage = event => {
     const message = JSON.parse(event.data)
     if (message.method === 'Network.requestWillBeSent' && message.params.request.url.includes('/api/courses?')) {
       requests.push(new URL(message.params.request.url))
+    }
+    if (message.method === 'Network.requestWillBeSent' && new URL(message.params.request.url).pathname.startsWith('/api/watchlist')) {
+      watchlistRequests.push(message.params.request)
     }
     if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails)
     if (message.method === 'Network.responseReceived' && message.params.response.url.includes('/api/courses?')) responses.push(message.params)
@@ -130,8 +134,17 @@ try {
   assert.equal(rows[1][5], 'Closed')
   assert.equal(rows[2][5], 'Cancelled')
   assert.ok(await evaluate(`button('Previous').disabled && !button('Next').disabled`))
+  await waitFor(`Boolean(button('Add')) && !button('Add').disabled`)
+  await send('Network.setBlockedURLs', { urls: [`${origin}/api/watchlist`] })
   await evaluate(`button('Add').click()`)
+  await waitFor(`document.body.textContent.includes('Unable to update your watchlist')`)
+  assert.ok(await evaluate(`!button('Added') && !button('Add').disabled`))
+  await send('Network.setBlockedURLs', { urls: [] })
+  const addsBefore = watchlistRequests.filter(request => request.method === 'POST').length
+  await evaluate(`button('Add').click(); button('Add').click()`)
   await waitFor(`Boolean(button('Added')?.disabled)`)
+  assert.equal(watchlistRequests.filter(request => request.method === 'POST').length, addsBefore + 1)
+
   await evaluate(`button('Next').click()`)
   await waitFor(`document.querySelectorAll('tbody tr').length===3 && document.body.textContent.includes('Page 2')`)
   assert.equal(requests.at(-1).searchParams.get('offset'), '50')
@@ -147,15 +160,52 @@ try {
   await evaluate(`document.querySelector('button[type=submit]').click()`)
   await waitFor(`document.body.textContent.includes('No matching course sections found')`)
   assert.ok(await evaluate(`button('Previous').disabled && button('Next').disabled`))
+  // Real watchlist persistence, stored status, retryable loading/removal errors.
+  await evaluate(`button('Watchlist').click()`)
+  await waitFor(`document.querySelectorAll('tbody tr').length===1 && !document.body.textContent.includes('Loading your watchlist')`)
+  const watchRow = await evaluate(`[...document.querySelector('tbody tr').children].map(cell=>cell.textContent.trim())`)
+  assert.deepEqual(watchRow.slice(0,4), ['12000','CS 100','202710','000'])
+  assert.equal(watchRow[6], 'Open')
+  await send('Page.reload')
+  await waitFor(`location.pathname==='/dashboard' && document.querySelectorAll('tbody tr').length===1 && !document.body.textContent.includes('Loading your watchlist')`)
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
+  await writeFile(join(tmpdir(), 'njit-phase3-watchlist-desktop.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'))
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+  await writeFile(join(tmpdir(), 'njit-phase3-watchlist-mobile.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'))
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
+  await evaluate(`button('Search Courses').click()`)
+  await waitFor(`Boolean(document.querySelector('#search-term option[value="202710"]')) && !document.body.textContent.includes('Loading your watchlist')`)
+  await evaluate(`setField('search-term','202710'); setField('search-department','CS')`)
+  await evaluate(`document.querySelector('button[type=submit]').click()`)
+  await waitFor(`Boolean(button('Added')?.disabled)`)
+  await evaluate(`button('Watchlist').click()`)
+  await waitFor(`document.querySelectorAll('tbody tr').length===1 && !document.body.textContent.includes('Loading your watchlist')`)
+  await send('Network.setBlockedURLs', { urls: [`${origin}/api/watchlist`] })
+  await send('Page.reload')
+  await waitFor(`Boolean(button('Retry watchlist'))`)
+  assert.ok(await evaluate(`document.body.textContent.includes('Unable to load your watchlist')`))
+  await send('Network.setBlockedURLs', { urls: [] })
+  await evaluate(`button('Retry watchlist').click()`)
+  await waitFor(`document.querySelectorAll('tbody tr').length===1 && !document.body.textContent.includes('Loading your watchlist')`)
+  const removeButton = `document.querySelector('button[aria-label^="Remove CS 100"]')`
+  const sectionId = unfiltered.sections[0].id
+  await send('Network.setBlockedURLs', { urls: [`${origin}/api/watchlist/${sectionId}`] })
+  await evaluate(`${removeButton}.click()`)
+  await waitFor(`document.body.textContent.includes('Unable to update your watchlist')`)
+  assert.equal(await evaluate(`document.querySelectorAll('tbody tr').length`), 1)
+  await send('Network.setBlockedURLs', { urls: [] })
+  await evaluate(`${removeButton}.click()`)
+  await waitFor(`document.body.textContent.includes('Your watchlist is empty.')`)
+  await send('Page.reload')
+  await waitFor(`location.pathname==='/dashboard' && document.body.textContent.includes('Your watchlist is empty.')`)
   // Expire the actual database session; leave its signed browser cookie intact.
   execFileSync('docker', ['exec', process.env.INTEGRATION_BACKEND_CONTAINER, 'node', '-e',
     "const pool=require('./src/db'); pool.query('UPDATE sessions SET expires=1').finally(()=>pool.end())"], { timeout: 15000 })
-  // Reopening Search exercises expiry handling on the metadata endpoint itself.
-  await evaluate(`button('Watchlist').click()`)
+  // Search and watchlist loading both retain session-expiry handling.
   await evaluate(`button('Search Courses').click()`)
   await waitFor(`location.pathname==='/login' && Boolean(document.getElementById('password'))`)
   assert.deepEqual(errors, [])
-  console.log('PASS real React → Nginx → Express → MariaDB: catalog options/retry, term-dependent departments, unfiltered Spring, parameters, rows, statuses/nulls, Add, pagination snapshots, empty results, metadata session expiry')
+  console.log('PASS real React → Nginx → Express → MariaDB: catalog options/retry, term-dependent departments, unfiltered Spring, parameters, rows, statuses/nulls, persistent Add/reload/Remove, watchlist retries, duplicate-click protection, pagination snapshots, empty results, session expiry')
   }
 } finally {
   ws?.close()

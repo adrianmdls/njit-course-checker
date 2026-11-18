@@ -54,6 +54,12 @@ class PipelineTests(unittest.TestCase):
                                       statement, json.dumps(params or [])))
 
     def probe(self, mode, **options):
+        if mode in ("search", "options", "watchlist") and options.get("authenticated", True):
+            # Real registration/login once per test; reuse the signed cookie
+            # across one-shot probe containers instead of exhausting auth limits.
+            if self.session_cookies is None:
+                self.session_cookies = self.probe("authenticate")["cookies"]
+            options["session_cookies"] = self.session_cookies
         return json.loads(self.command("run", "--rm", "--no-deps", "-T", "checker-test",
                                        input=json.dumps({"mode": mode, **options})))
 
@@ -66,6 +72,7 @@ class PipelineTests(unittest.TestCase):
         print(browser.stdout, flush=True)
 
     def setUp(self):
+        self.session_cookies = None
         for table in ("Watchlists", "Sections", "Courses", "Users", "DepartmentSyncs", "sessions"):
             self.sql(f"DELETE FROM {table}")
 
@@ -236,6 +243,9 @@ class PipelineTests(unittest.TestCase):
     def test_empty_sync_retains_rows_ids_watchlists_and_section_timestamps(self):
         self.seed_watchlists()
         self.assertEqual(self.probe("poll")["errors"], 0)
+        # Exercise preservation of both activity states, not only default-active rows.
+        self.sql("UPDATE Sections SET is_active=FALSE WHERE subject=? AND term=? AND crn=?",
+                 ["CS", "202710", "12346"])
         self.age_timestamps()
         before = self.snapshot()
         result = self.probe("poll", banner_fixture="empty")
@@ -247,6 +257,77 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.probe("submit", subject="DS", term="202710", banner_fixture="empty"),
                          {"courses": 0, "sections": 0, "status_changes": 0})
         self.assertEqual(self.snapshot()["Sections"], before["Sections"])
+
+    def test_section_activity_lifecycle_through_python_api_search_and_watchlist(self):
+        # CS fixtures use stable CRNs 12000/12001 for section_count=2. Mixed
+        # status makes the returning section CLOSED while the survivor stays OPEN.
+        self.assertEqual(self.probe("submit", subject="CS", term="202710", section_count=2, mixed=True),
+                         {"courses": 1, "sections": 2, "status_changes": 0})
+        query = {"term": "202710", "subject": "CS"}
+
+        def search():
+            response = self.probe("search", queries=[query])[0]
+            self.assertEqual(response["status"], 200)
+            return response["body"]
+
+        original = search()  # Creates the authenticated fixture user as usual.
+        ids = {row["crn"]: row["id"] for row in original["sections"]}
+        self.assertEqual(set(ids), {"12000", "12001"})
+        self.assertTrue(all(row["is_active"] is True for row in original["sections"]))
+        self.sql("INSERT INTO Watchlists(user_id,section_id) "
+                 "SELECT id,? FROM Users WHERE username=?", [ids["12001"], "course_search_fixture"])
+        before = self.snapshot()
+        missing = next(row for row in before["Sections"] if row["id"] == ids["12001"])
+        self.assertEqual(missing["status"], "CLOSED")
+
+        self.assertEqual(self.probe("submit", subject="CS", term="202710", section_count=1),
+                         {"courses": 1, "sections": 1, "status_changes": 0})
+        after = self.snapshot()
+        self.assertEqual(next(row for row in after["Sections"] if row["id"] == ids["12001"]),
+                         {**missing, "is_active": 0}, "omission changes only activity")
+        self.assertEqual(after["Watchlists"], before["Watchlists"])
+        visible = search()
+        self.assertEqual(visible["pagination"]["total"], 1)
+        self.assertEqual([row["id"] for row in visible["sections"]], [ids["12000"]])
+        watched = self.probe("watchlist")
+        self.assertEqual(watched["status"], 200)
+        self.assertEqual(len(watched["body"]["sections"]), 1)
+        retained = watched["body"]["sections"][0]
+        self.assertEqual(retained["section_id"], ids["12001"])
+        self.assertIs(retained["is_active"], False)
+        self.assertEqual(retained["status"], "CLOSED")
+        self.assertEqual(retained["last_checked_at"], missing["last_checked_at"])
+        self.assertIn({"subject": "CS", "term": "202710"}, self.probe("targets")["targets"],
+                      "an inactive-only watch must remain monitored")
+
+        self.assertEqual(self.probe("submit", subject="CS", term="202710", section_count=2),
+                         {"courses": 1, "sections": 2, "status_changes": 0},
+                         "CLOSED to OPEN on reappearance establishes a baseline")
+        restored = search()
+        self.assertEqual({row["crn"]: row["id"] for row in restored["sections"]}, ids)
+        self.assertTrue(all(row["is_active"] is True for row in restored["sections"]))
+        returned_watch = self.probe("watchlist")["body"]["sections"][0]
+        self.assertEqual(returned_watch["section_id"], ids["12001"])
+        self.assertIs(returned_watch["is_active"], True)
+        self.assertEqual(returned_watch["status"], "OPEN")
+        self.assertEqual(self.snapshot()["Watchlists"], before["Watchlists"])
+        for status in ("CLOSED", "OPEN"):
+            self.assertEqual(self.probe("submit", subject="CS", term="202710", section_count=2, status=status),
+                             {"courses": 1, "sections": 2, "status_changes": 2},
+                             "continuously active status transitions still count")
+
+    def test_section_activity_schema_and_existing_mariadb_migration_regressions(self):
+        columns = self.sql("SHOW COLUMNS FROM Sections LIKE 'is_active'")
+        self.assertEqual(len(columns), 1, "disposable initialization must include is_active")
+        self.assertTrue(columns[0]["Type"].lower().startswith("tinyint"))
+        self.assertEqual(columns[0]["Null"], "NO")
+        self.assertEqual(str(columns[0]["Default"]), "1")
+        # Reuse rather than copy the existing migration/experimental-column/SQL
+        # regressions. They create/drop only their own random schema on this test DB.
+        output = self.command("exec", "-T", "-e", "TEST_DB_HOST=db", "-e", "TEST_DB_PORT=3306",
+                              "-e", "TEST_DB_PASSWORD=integration-only-password", "backend",
+                              "node", "--test", "test/section-activity.test.cjs")
+        print(output, flush=True)
 
     def test_malformed_fixture_never_advances_completion(self):
         self.seed_watchlists()
@@ -279,7 +360,9 @@ class PipelineTests(unittest.TestCase):
         self.sql("CREATE TRIGGER integration_fail_sync BEFORE INSERT ON DepartmentSyncs "
                  "FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='fixture failure'")
         try:
-            result = self.probe("poll", status="CLOSED")
+            # A new CS CRN omits the two stored ones. Failure at department
+            # completion must roll back their deactivation as well as all upserts.
+            result = self.probe("poll", status="CLOSED", section_count=1)
             self.assertEqual(result["errors"], 2, result)
             self.assertTrue(all("HTTP 503" in row for row in result["results"]), result)
             self.assertEqual(self.snapshot(), before)
@@ -288,7 +371,11 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(self.snapshot(), before)
         finally:
             self.sql("DROP TRIGGER integration_fail_sync")
-        self.assertEqual(self.probe("poll", status="CLOSED")["errors"], 0)
+        self.assertEqual(self.probe("poll", status="CLOSED", section_count=1)["errors"], 0)
+        cs = self.sql("SELECT crn,is_active FROM Sections WHERE subject=? AND term=? ORDER BY crn",
+                      ["CS", "202710"])
+        self.assertEqual(cs, [{"crn": "12000", "is_active": 1}, {"crn": "12345", "is_active": 0},
+                              {"crn": "12346", "is_active": 0}])
 
     def test_actual_manual_checker_is_read_only(self):
         self.seed_watchlists()

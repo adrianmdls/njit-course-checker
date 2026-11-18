@@ -126,14 +126,14 @@ test('parameterized watchlist SQL binds the session owner and preserves stored s
   const api = await serve(fakePool(async (sql, values) => {
     calls.push({ sql, values });
     if (sql.startsWith('SELECT')) return [[{ section_id: 11, course: 'CS 100', title: 'Intro', subject: 'CS',
-      term: '202710', crn: '01234', section: 'H01', max: null, now: null, status: 'CLOSED', checked_epoch: null }]];
+      term: '202710', crn: '01234', section: 'H01', max: null, now: null, status: 'CLOSED', is_active: 0, checked_epoch: null }]];
     return [{ affectedRows: 1 }];
   }));
   try {
     const response = await api.request();
     assert.equal(response.status, 200);
     assert.deepEqual((await response.json()).sections[0], { section_id: 11, course: 'CS 100', title: 'Intro', subject: 'CS',
-      term: '202710', crn: '01234', section: 'H01', max: null, now: null, status: 'CLOSED', last_checked_at: null });
+      term: '202710', crn: '01234', section: 'H01', max: null, now: null, status: 'CLOSED', is_active: false, last_checked_at: null });
     assert.match(calls[0].sql, /WHERE w.user_id = \?/);
     assert.deepEqual(calls[0].values, [1]);
     assert.equal((await api.request('POST', '/api/watchlist', { section_id: 11 })).status, 201);

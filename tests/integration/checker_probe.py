@@ -60,10 +60,10 @@ def run(options):
     if options.get("invalid_token"):
         os.environ["CHECKER_API_TOKEN"] = "invalid-integration-token"
     try:
-        if mode in ("search", "options"):
+        if mode in ("authenticate", "search", "options", "watchlist"):
             # Exercise Nginx, real login and cookie reuse; no Banner helper is called.
             with requests.Session() as session:
-                if options.get("authenticated", True):
+                if mode == "authenticate":
                     headers = {"Origin": os.environ["APP_ORIGIN"],
                                "X-Requested-With": "NJIT-Course-Checker"}
                     credentials = {"username": "course_search_fixture", "email": "search@example.invalid",
@@ -73,9 +73,13 @@ def run(options):
                     response = session.post("http://frontend/api/auth/login", json={
                         "identifier": credentials["username"], "password": credentials["password"]}, headers=headers, timeout=10)
                     response.raise_for_status()
+                    return {"cookies": requests.utils.dict_from_cookiejar(session.cookies)}
+                if options.get("authenticated", True):
+                    session.cookies.update(options["session_cookies"])
                 results = []
-                if mode == "options":
-                    response = session.get("http://frontend/api/courses/options", timeout=10)
+                if mode in ("options", "watchlist"):
+                    path = "/api/courses/options" if mode == "options" else "/api/watchlist"
+                    response = session.get(f"http://frontend{path}", timeout=10)
                     return {"status": response.status_code, "body": response.json()}
                 for query in options["queries"]:
                     response = session.get("http://frontend/api/courses", params=query, timeout=10)

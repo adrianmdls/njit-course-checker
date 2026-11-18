@@ -36,6 +36,7 @@ module.exports = function createCourses(pool, auth) {
     if (Object.keys(req.query).length) return res.status(400).json({ error: 'Catalog options do not accept query parameters' });
     const [rows] = await pool.execute(`SELECT DISTINCT s.term, c.subject
       FROM Sections s INNER JOIN Courses c ON s.course_id = c.id
+      WHERE s.is_active = TRUE
       ORDER BY s.term DESC, c.subject ASC`);
     const terms = [];
     for (const { term, subject } of rows) {
@@ -52,7 +53,7 @@ module.exports = function createCourses(pool, auth) {
     const filters = validate(req.query);
     if (!filters) return res.status(400).json({ error: 'Invalid course search parameters' });
     const { term, subject, prefix, status, sort, order, limit, offset } = filters;
-    const conditions = ['s.term = ?'];
+    const conditions = ['s.term = ?', 's.is_active = TRUE'];
     const values = [term];
     for (const [condition, value] of [
       ['c.subject = ?', subject], ['c.course_number LIKE ?', prefix === undefined ? undefined : `${prefix}%`],
@@ -74,9 +75,10 @@ module.exports = function createCourses(pool, auth) {
     const [[count]] = await pool.execute(`SELECT COUNT(*) AS total ${from}`, values);
     const [rows] = await pool.execute(`SELECT s.id, CONCAT(c.subject, ' ', c.course_number) AS course,
       c.subject, c.course_number, c.title, s.term, s.crn, s.section_number AS section,
-      s.capacity AS max, s.enrolled AS now, s.status, UNIX_TIMESTAMP(s.last_checked_at) AS checked_epoch
+      s.capacity AS max, s.enrolled AS now, s.status, s.is_active, UNIX_TIMESTAMP(s.last_checked_at) AS checked_epoch
       ${from} ORDER BY ${ordering} LIMIT ? OFFSET ?`, [...values, limit, offset]);
     const sections = rows.map(({ checked_epoch, ...row }) => ({ ...row,
+      is_active: Number(row.is_active) === 1,
       last_checked_at: checked_epoch === null ? null : new Date(Number(checked_epoch) * 1000).toISOString(),
     }));
     res.json({ sections, pagination: { limit, offset, total: Number(count.total) } });

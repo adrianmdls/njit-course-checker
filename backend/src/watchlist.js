@@ -20,11 +20,12 @@ module.exports = function createWatchlist(pool, auth) {
     const [rows] = await pool.execute(`SELECT s.id AS section_id,
       COALESCE(CONCAT(c.subject, ' ', c.course_number), NULLIF(w.course_number_label, ''), s.subject) AS course,
       c.title, s.subject, s.term, s.crn, s.section_number AS section,
-      s.capacity AS max, s.enrolled AS now, s.status, UNIX_TIMESTAMP(s.last_checked_at) AS checked_epoch
+      s.capacity AS max, s.enrolled AS now, s.status, s.is_active, UNIX_TIMESTAMP(s.last_checked_at) AS checked_epoch
       FROM Watchlists w INNER JOIN Sections s ON s.id = w.section_id
       LEFT JOIN Courses c ON c.id = s.course_id
       WHERE w.user_id = ? ORDER BY s.term DESC, s.subject, c.course_number, s.section_number, s.id`, [req.user.id]);
     res.json({ sections: rows.map(({ checked_epoch, ...row }) => ({ ...row,
+      is_active: Number(row.is_active) === 1,
       last_checked_at: checked_epoch === null ? null : new Date(Number(checked_epoch) * 1000).toISOString(),
     })) });
   });

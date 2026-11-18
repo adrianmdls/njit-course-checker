@@ -23,8 +23,5 @@ COPY src/ ./src/
 COPY manual_check /usr/local/bin/manual_check
 RUN chmod +x /usr/local/bin/manual_check
 
-# Set default check interval to 10 minutes
-ENV CHECK_INTERVAL=600
-
 # Start the automated checker
 CMD ["python", "-u", "-m", "src.checker"]

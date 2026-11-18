@@ -113,6 +113,8 @@ test('valid filters are parameterized, terms include Winter, and empty results i
     assert.deepEqual(calls.at(-1).params, ['202795', 'CS', '280A%', 'CLOSED', 100, 2147483647]);
     assert.match(calls.at(-1).sql, /INNER JOIN Courses c ON s.course_id = c.id/);
     assert.match(calls.at(-1).sql, /s.id DESC/);
+    assert.match(calls.at(-2).sql, /s.is_active = TRUE/);
+    assert.match(calls.at(-1).sql, /s.is_active = TRUE/);
     assert.ok(!calls.at(-1).sql.includes('280A'));
   } finally { await api.close(); }
 });
@@ -143,6 +145,7 @@ test('catalog options use local DISTINCT joined pairs, reject parameters, and su
       { code: '202795', departments: ['ECE'] }, { code: '202710', departments: ['CS', 'IT'] },
     ] });
     assert.match(calls[0].sql, /SELECT DISTINCT s.term, c.subject/);
+    assert.match(calls[0].sql, /WHERE s.is_active = TRUE/);
     assert.match(calls[0].sql, /INNER JOIN Courses c ON s.course_id = c.id/);
     assert.match(calls[0].sql, /ORDER BY s.term DESC, c.subject ASC/);
     for (const query of ['?term=202710', '?subject=CS&subject=IT', '?query=1%27%20OR%201=1']) {
@@ -234,7 +237,7 @@ test('MariaDB course search with real login, filters, all sort directions, pagin
       const result = await search('&query=CS%20280&sort=crn&order=desc');
       assert.deepEqual(result.sections.find(row => row.id === 1), {
         id: 1, course: 'CS 280', subject: 'CS', course_number: '280', title: 'Concepts', term: '202710',
-        crn: '08002', section: '002', max: 35, now: 28, status: 'OPEN', last_checked_at: '2026-11-17T15:30:00.000Z',
+        crn: '08002', section: '002', max: 35, now: 28, status: 'OPEN', is_active: true, last_checked_at: '2026-11-17T15:30:00.000Z',
       });
       const nullable = (await search()).sections.find(row => row.id === 5);
       for (const field of ['max', 'section', 'status', 'last_checked_at']) assert.equal(nullable[field], null);

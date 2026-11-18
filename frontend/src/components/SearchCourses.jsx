@@ -229,7 +229,7 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
           <button type="button" onClick={() => { setOptionsError(''); setOptionsAttempt(attempt => attempt + 1) }} className="mt-2 cursor-pointer rounded-md border border-slate-300 px-4 py-2 font-semibold">Retry catalog options</button>
         </div>
       )}
-      {options?.terms.length === 0 && <p role="status" className="mt-6 text-slate-500">No searchable local catalog data is available. Selected departments and terms must be synchronized before searching.</p>}
+      {options?.terms.length === 0 && <p role="status" className="mt-6 text-slate-500">No searchable local catalog data is available. No active sections are currently stored.</p>}
       {loading && <p role="status" className="mt-6 text-slate-500">Loading course sections…</p>}
       {error && <p role="alert" className="mt-6 text-red-600">{error}</p>}
       {options?.terms.length > 0 && results === null && !loading && !error && (

@@ -133,7 +133,7 @@ export default function Dashboard() {
             <table className="w-full min-w-[1000px] border-collapse text-left text-[#0B1733]">
               <thead className="bg-slate-50">
                 <tr>
-                  {['CRN', 'Course', 'Term', 'Section', 'Max', 'Now', 'Status', 'Last Checked', 'Remove'].map((heading) => (
+                  {['CRN', 'Course', 'Term', 'Section', 'Max', 'Now', 'Status', 'Last Seen', 'Remove'].map((heading) => (
                     <th
                       key={heading}
                       className="px-5 py-4 text-sm font-semibold whitespace-nowrap"
@@ -146,7 +146,9 @@ export default function Dashboard() {
 
               <tbody>
                 {courses.map((course) => {
-                  const statusLabel = { OPEN: 'Open', CLOSED: 'Closed', CANCELLED: 'Cancelled' }[course.status] ?? 'Unknown'
+                  const unavailable = course.is_active === false
+                  const statusLabel = unavailable ? 'Unavailable'
+                    : { OPEN: 'Open', CLOSED: 'Closed', CANCELLED: 'Cancelled' }[course.status] ?? 'Unknown'
 
                   return (
                     <tr key={course.section_id} className="border-t border-slate-200">
@@ -158,19 +160,20 @@ export default function Dashboard() {
 
                       <td className="px-5 py-3 whitespace-nowrap">{course.term}</td>
                       <td className="px-5 py-3">{course.section ?? '—'}</td>
-                      <td className="px-5 py-3">{course.max ?? '—'}</td>
-                      <td className="px-5 py-3">{course.now ?? '—'}</td>
+                      <td className="px-5 py-3">{unavailable ? '—' : course.max ?? '—'}</td>
+                      <td className="px-5 py-3">{unavailable ? '—' : course.now ?? '—'}</td>
 
                       <td className="px-5 py-3">
                         <span
                           className={`inline-block min-w-[95px] rounded-md px-4 py-2 text-center font-semibold ${
-                            course.status === 'OPEN'
+                            unavailable ? 'bg-slate-100 text-slate-600' : course.status === 'OPEN'
                               ? 'bg-green-100 text-green-700'
                               : course.status === 'CLOSED' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'
                           }`}
                         >
                           {statusLabel}
                         </span>
+                        {unavailable && <p className="mt-1 text-xs text-slate-500">Not present in the latest successful nonempty Banner snapshot.</p>}
                       </td>
 
                       <td className="px-5 py-3 whitespace-nowrap">

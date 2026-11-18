@@ -103,14 +103,14 @@ not reveal whether another user's watch exists. Database failures are sanitized
 by the existing server error handler.
 
 List rows contain `section_id`, `course`, `title`, `subject`, `crn`, `term`,
-`section`, `max`, `now`, `status` and UTC ISO `last_checked_at`. Nullable values
+`section`, `max`, `now`, `status`, boolean `is_active` and UTC ISO `last_checked_at`. Nullable values
 stay null. Status is stored status rather than an inference from available seats.
 Legacy sections without a course link remain visible using their saved label or
 subject; no placeholder Course rows are created.
 
 The existing unique `(user_id, section_id)` key prevents concurrent duplicates.
-Insertion checks section existence in the same SQL statement. No schema changes
-are required. The watched-only internal targets endpoint immediately reflects
+Insertion checks section existence in the same SQL statement. No additional
+Watchlists table changes are required. The watched-only internal targets endpoint immediately reflects
 committed additions/removals across all users. Removing one user's watch does
 not demote a pair still watched elsewhere. Scheduler term/allowlist filtering and
 polling times are unchanged. See [Phase 3 notes](../docs/phase-3-watchlists.md).
@@ -143,7 +143,7 @@ Validation failures include fixed `validation.field`, zero-based `validation.row
 
 `sections` uses the existing `parse_all_sections()` field names. Other scraper fields are ignored. Only an exact matching `course + " - "` prefix is removed from a title; other title text is preserved. Subject must be uppercase alphanumeric, start with a letter, and contain at most 10 characters. Term is a six-digit string with Banner suffix `10`, `50`, `90`, or `95` (Winter), matching the existing checker. Course identifiers use `SUBJECT NUMBER`, separated by whitespace; the number starts with a digit and contains at most 20 uppercase alphanumeric characters. The course subject must match the snapshot. CRNs are five-digit strings. Titles and section labels must be nonempty and fit their schema limits of 255 and 20 characters. Enrollment values are nonnegative unsigned 32-bit integers; over-enrollment is allowed. Status must be `OPEN`, `CLOSED`, or `CANCELLED`. Empty arrays are accepted as nondestructive successful synchronization: only the department completion timestamp changes. Conflicting course titles and conflicting duplicate CRNs are rejected. Identical duplicate CRNs count once.
 
-No capture timestamp is required; `snapshot_started_at` is ignored if supplied. The department lock prevents overlapping writes, but does **not** detect out-of-order snapshots. The polling caller must fetch and submit each snapshot sequentially, waiting for completion before the next fetch. If submission fails or times out, finish retrying that snapshot before sending another, or discard it and fetch a fresh snapshot. Do not send delayed retries after submitting newer data. Parallel producers would require snapshot ordering protection in a later change. No schema migration is required.
+No capture timestamp is required; `snapshot_started_at` is ignored if supplied. The department lock prevents overlapping writes, but does **not** detect out-of-order snapshots. The polling caller must fetch and submit each snapshot sequentially, waiting for completion before the next fetch. If submission fails or times out, finish retrying that snapshot before sending another, or discard it and fetch a fresh snapshot. Do not send delayed retries after submitting newer data. Parallel producers would require snapshot ordering protection in a later change.
 
 Example response:
 
@@ -151,7 +151,15 @@ Example response:
 {"courses":1,"sections":1,"status_changes":0}
 ```
 
-Counts refer to unique supplied courses/sections. New sections do not count as status changes. For existing sections, any different stored status (including NULL) counts once. Repeated identical requests report zero status changes, create no duplicate records, and refresh `last_checked_at` and `last_synced_at`. Courses upsert by `(subject, course_number)` and sections by `(term, crn)`. Existing section IDs and Watchlist references survive; watched and unwatched sections receive the same updates, including legacy rows with a NULL course link. A CRN already owned by another subject in that term returns `409`. Sections missing from a snapshot are retained; absence does not imply cancellation.
+Counts refer to unique supplied courses/sections. New or reactivated sections do not count as status changes. For already active sections, any different stored status (including NULL) counts once. Repeated identical requests report zero status changes, create no duplicate records, and refresh observed sections' `last_checked_at` and department `last_synced_at`. Courses upsert by `(subject, course_number)` and sections by `(term, crn)`. Existing section IDs and Watchlist references survive; watched and unwatched sections receive the same updates, including legacy rows with a NULL course link. A CRN already owned by another subject in that term returns `409`.
+
+Validated complete nonempty snapshots mark omitted sections inactive within the
+same transaction, preserving their stored Banner status and last-seen fields.
+Returning sections reactivate. Empty snapshots preserve all section activity until
+real Banner empty-result semantics are verified. Search/counts/catalog options
+exclude inactive sections; watchlists include them and both APIs expose boolean
+`is_active`. Inactive watched sections still contribute monitoring targets.
+See [activity behavior and the required existing-volume migration](../docs/section-activity.md).
 
 All writes and the successful `DepartmentSyncs.last_synced_at` completion timestamp share one transaction. A MariaDB advisory lock named `njit:sync:<subject>:<term>` rejects overlapping API requests with `409` across backend instances. Row locks protect comparisons and updates; the advisory lock is released before returning the connection to the pool. Database failures roll back the transaction and return `503` through the backend error handler. Other responses include `400` for invalid input/JSON, `401` for invalid credentials, `413` for oversized JSON, and `415` for a non-JSON content type.
 
