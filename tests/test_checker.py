@@ -70,18 +70,22 @@ class CheckerTests(unittest.TestCase):
         self.assertEqual((len(results), errors), (2, 1))
         submit.assert_called_once_with("CS", "202710", SECTIONS)
 
-    def test_invalid_or_empty_banner_snapshot_is_not_submitted(self):
-        for parsed in ([], ValueError("Invalid enrollment")):
-            with self.subTest(parsed=parsed), \
+    def test_valid_empty_snapshot_is_submitted(self):
+        with patch.object(checker, "get_monitoring_targets", return_value=TARGETS[:1]), \
+             patch.object(checker, "get_sections", return_value=[]), \
+             patch.object(checker, "submit_department_snapshot", return_value={
+                 "courses": 0, "sections": 0, "status_changes": 0}) as submit:
+            _, errors, _ = checker.check_once()
+        self.assertEqual(errors, 0)
+        submit.assert_called_once_with("IT", "202795", [])
+
+    def test_malformed_snapshot_is_not_submitted(self):
+        for data in ({}, [{"SECTIONS_TABLE": "<p>upstream failure</p>"}]):
+            with self.subTest(data=data), \
                  patch.object(checker, "get_monitoring_targets", return_value=TARGETS[:1]), \
-                 patch.object(checker, "get_sections", return_value=[]), \
-                 patch.object(checker, "parse_all_sections") as parse, \
+                 patch.object(checker, "get_sections", return_value=data), \
                  patch.object(checker, "submit_department_snapshot") as submit, \
                  self.assertLogs(checker.logger):
-                if isinstance(parsed, Exception):
-                    parse.side_effect = parsed
-                else:
-                    parse.return_value = parsed
                 _, errors, _ = checker.check_once()
                 self.assertEqual(errors, 1)
                 submit.assert_not_called()

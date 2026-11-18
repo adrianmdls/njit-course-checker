@@ -34,8 +34,6 @@ def check_once(persist_state=True):
         subject, term = target["subject"], target["term"]
         try:
             sections = parse_all_sections(get_sections(subject, term))
-            if not sections:
-                raise ValueError("No sections found. Skipping synchronization.")
             if persist_state:
                 counts = submit_department_snapshot(subject, term, sections)
                 message = (

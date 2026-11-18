@@ -41,7 +41,7 @@ test('authentication and validation reject requests before accessing the databas
     assert.equal((await api.post('{')).status, 400);
     assert.equal((await api.post(' '.repeat(5 * 1024 * 1024 + 1))).status, 413);
     const invalid = [null, { subject: 'cs' }, { subject: 'CS; DROP TABLE Courses' },
-      { term: '202711' }, { term: 202710 }, { sections: [] },
+      { term: '202711' }, { term: 202710 }, { sections: null }, { sections: {} },
       ...[{ course: 'IT 100' }, { course: 'CS' }, { crn: '1234' }, { crn: 12345 },
         { title: '' }, { section: '' }, { status: 'open' }, { status: 'FULL' },
         { max_enrollment: -1 }, { current_enrollment: 1.5 }, { current_enrollment: '20' },
@@ -60,6 +60,46 @@ test('authentication and validation reject requests before accessing the databas
     assert.equal((await disabled.get()).status, 503);
   }
   finally { await disabled.close(); }
+});
+
+test('validation diagnostics identify only fixed fields, row indexes and reason codes', async t => {
+  const warning = t.mock.method(console, 'warn', () => {});
+  const api = await serve({ getConnection() { throw new Error('No database access on invalid input'); } });
+  try {
+    const cases = [
+      [snapshot({ subject: 'PRIVATE-SUBJECT' }), 'subject', null, 'invalid_subject'],
+      [snapshot({ term: 'PRIVATE-TERM' }), 'term', null, 'invalid_term'],
+      [snapshot({ sections: 'PRIVATE-SECTIONS' }), 'sections', null, 'invalid_sections'],
+      [snapshot({ sections: [null] }), 'row', 0, 'invalid_row'],
+      [snapshot({ sections: [section({ course: 'PRIVATE-COURSE' })] }), 'course', 0, 'invalid_course'],
+      [snapshot({ sections: [section({ course: 'DS 644' })] }), 'course', 0, 'subject_mismatch'],
+      [snapshot({ sections: [section({ crn: 'PRIVATE-CRN' })] }), 'crn', 0, 'invalid_crn'],
+      [snapshot({ sections: [section({ title: 'x'.repeat(256) })] }), 'title', 0, 'invalid_title'],
+      [snapshot({ sections: [section({ section: 'x'.repeat(21) })] }), 'section', 0, 'invalid_section'],
+      [snapshot({ sections: [section({ status: 'PRIVATE-STATUS' })] }), 'status', 0, 'invalid_status'],
+      [snapshot({ sections: [section({ max_enrollment: -1 })] }), 'max_enrollment', 0, 'invalid_enrollment'],
+      [snapshot({ sections: [section({ current_enrollment: 'PRIVATE-ENROLLMENT' })] }), 'current_enrollment', 0, 'invalid_enrollment'],
+      [snapshot({ sections: [section(), section({ crn: '12346', title: 'PRIVATE-TITLE' })] }), 'title', 1, 'conflicting_title'],
+      [snapshot({ sections: [section(), section({ status: 'CLOSED' })] }), 'crn', 1, 'conflicting_crn'],
+    ];
+    for (const [body, field, row_index, reason] of cases) {
+      const response = await api.post(body);
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), {
+        error: 'Invalid department snapshot', validation: { field, row_index, reason },
+      });
+      assert.deepEqual(JSON.parse(warning.mock.calls.at(-1).arguments[0]), {
+        event: 'sync_validation_failed', field, row_index, reason,
+      });
+    }
+    assert.ok(!JSON.stringify(warning.mock.calls.map(call => call.arguments)).includes('PRIVATE-'));
+    // Plausible DS payload conflict, not a capture of the historical failure.
+    const ds = section({ course: 'DS 644', title: 'DS 644 - Introduction to Big Data' });
+    const response = await api.post(snapshot({ subject: 'DS', sections: [ds,
+      { ...ds, crn: '12346', title: 'Alternate title' }] }));
+    assert.equal(response.status, 400);
+    assert.deepEqual((await response.json()).validation, { field: 'title', row_index: 1, reason: 'conflicting_title' });
+  } finally { await api.close(); }
 });
 
 test('production requires HTTPS for machine authentication', async () => {
@@ -214,6 +254,48 @@ test('MariaDB upserts, watchlists, rollback, idempotency, Winter terms and locki
         if (previousTargets === undefined) delete process.env.CHECKER_MONITORING_TARGETS;
         else process.env.CHECKER_MONITORING_TARGETS = previousTargets;
       }
+      // Only this disposable database receives experimental compatibility columns.
+      await pool.query(`ALTER TABLE Sections ADD COLUMN snapshot_generation BIGINT UNSIGNED NOT NULL DEFAULT 0`);
+      await pool.query(`ALTER TABLE DepartmentSyncs
+        ADD COLUMN snapshot_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        ADD COLUMN last_refresh_status ENUM('success','error') DEFAULT NULL,
+        ADD COLUMN last_refresh_source ENUM('scheduled','on_demand') DEFAULT NULL`);
+      await pool.query("UPDATE Sections SET snapshot_generation=7");
+      await pool.query("UPDATE DepartmentSyncs SET snapshot_generation=7,last_refresh_status='error',last_refresh_source='on_demand'");
+      const [metadataBefore] = await pool.query('SELECT subject,term,snapshot_generation,last_refresh_status,last_refresh_source FROM DepartmentSyncs ORDER BY subject,term');
+      const [sectionGenerations] = await pool.query('SELECT id,snapshot_generation FROM Sections ORDER BY id');
+      assert.equal((await api.post(changed)).status, 200);
+      const capture = async () => {
+        const data = {};
+        for (const table of ['Courses', 'Sections', 'Watchlists']) {
+          [data[table]] = await pool.query(`SELECT * FROM ${table} ORDER BY id`);
+        }
+        return data;
+      };
+      const preserved = await capture();
+      await pool.query("UPDATE DepartmentSyncs SET last_synced_at='2000-01-01 00:00:00' WHERE subject='CS' AND term='202710'");
+      const empty = snapshot({ sections: [] });
+      response = await api.post(empty);
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { courses: 0, sections: 0, status_changes: 0 });
+      assert.deepEqual(await capture(), preserved, 'empty sync preserves every stored course, section and Watchlist field');
+      const [[emptySync]] = await pool.query("SELECT UNIX_TIMESTAMP(last_synced_at) AS synced FROM DepartmentSyncs WHERE subject='CS' AND term='202710'");
+      assert.ok(emptySync.synced > Date.UTC(2000, 0, 2) / 1000);
+      const [metadataAfter] = await pool.query('SELECT subject,term,snapshot_generation,last_refresh_status,last_refresh_source FROM DepartmentSyncs ORDER BY subject,term');
+      assert.deepEqual(metadataAfter, metadataBefore, 'experimental metadata is untouched');
+      const [generationsAfter] = await pool.query('SELECT id,snapshot_generation FROM Sections ORDER BY id');
+      assert.deepEqual(generationsAfter, sectionGenerations);
+      response = await api.post(snapshot({ subject: 'DS', sections: [] }));
+      assert.equal(response.status, 200, 'first-ever empty department succeeds');
+      const [[newSync]] = await pool.query("SELECT snapshot_generation,last_refresh_status,last_refresh_source FROM DepartmentSyncs WHERE subject='DS' AND term='202710'");
+      assert.deepEqual(newSync, { snapshot_generation: 0, last_refresh_status: null, last_refresh_source: null });
+      await pool.query("CREATE TRIGGER fail_empty BEFORE INSERT ON DepartmentSyncs FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='injected empty failure'");
+      const [syncBeforeFailure] = await pool.query('SELECT * FROM DepartmentSyncs ORDER BY subject,term');
+      assert.equal((await api.post(empty)).status, 503);
+      const [syncAfterFailure] = await pool.query('SELECT * FROM DepartmentSyncs ORDER BY subject,term');
+      assert.deepEqual(syncAfterFailure, syncBeforeFailure);
+      assert.deepEqual(await capture(), preserved);
+      await pool.query('DROP TRIGGER fail_empty');
     } finally {
       if (api) await api.close();
       await pool.end();

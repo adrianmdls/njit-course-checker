@@ -217,6 +217,44 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result["errors"], 2, result)
         self.assertEqual(self.snapshot(), before)
 
+    def test_empty_sync_retains_rows_ids_watchlists_and_section_timestamps(self):
+        self.seed_watchlists()
+        self.assertEqual(self.probe("poll")["errors"], 0)
+        self.age_timestamps()
+        before = self.snapshot()
+        result = self.probe("poll", banner_fixture="empty")
+        self.assertEqual(result["errors"], 0, result)
+        after = self.snapshot()
+        for table in ("Courses", "Sections", "Watchlists"):
+            self.assertEqual(after[table], before[table], table)
+        self.assertTrue(all(row["last_synced_at"] != "2000-01-01 00:00:00" for row in after["DepartmentSyncs"]))
+        self.assertEqual(self.probe("submit", subject="DS", term="202710", banner_fixture="empty"),
+                         {"courses": 0, "sections": 0, "status_changes": 0})
+        self.assertEqual(self.snapshot()["Sections"], before["Sections"])
+
+    def test_malformed_fixture_never_advances_completion(self):
+        self.seed_watchlists()
+        self.assertEqual(self.probe("poll")["errors"], 0)
+        self.age_timestamps()
+        before = self.snapshot()
+        for fixture in ("missing_table", "partial", "truncated", "invalid_envelope", "invalid_status",
+                        "unexpected_empty_markup"):
+            result = self.probe("poll", banner_fixture=fixture)
+            self.assertEqual(result["errors"], 2, (fixture, result))
+            self.assertEqual(self.snapshot(), before)
+
+    def test_synthetic_ds_success_and_conflicting_title_diagnostics(self):
+        counts = self.probe("submit", subject="DS", term="202710", banner_fixture="valid")
+        self.assertEqual(counts, {"courses": 1, "sections": 1, "status_changes": 0})
+        self.assertEqual(self.sql("SELECT crn,enrolled,capacity FROM Sections"),
+                         [{"crn": "01234", "enrolled": 31, "capacity": 30}])
+        self.age_timestamps()
+        before = self.snapshot()
+        rejected = self.probe("submit", subject="DS", term="202710", banner_fixture="conflicting_titles")
+        self.assertIn("HTTP 400", rejected["error"])
+        self.assertIn('"field": "title", "row_index": 1, "reason": "conflicting_title"', rejected["error"])
+        self.assertEqual(self.snapshot(), before)
+
     def test_backend_failure_rolls_back_existing_and_new_records(self):
         self.seed_watchlists()
         self.assertEqual(self.probe("poll")["errors"], 0)

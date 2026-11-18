@@ -22,6 +22,11 @@ results in a fresh installation. Automatic notifications are not implemented.
 
 ## Banner department synchronization
 
+Phase 1 hardening, department-list provenance, empty-response semantics and
+remaining verification limits are documented in [the stabilization notes](docs/phase-1-sync.md).
+Validated empty arrays now record nondestructive successful synchronization;
+unrecognized empty markup remains an error.
+
 Department snapshots now follow Banner → Python → Express → MariaDB. Set
 `CHECKER_API_TOKEN` in `.env` to a separate random secret (generate with
 `openssl rand -hex 32`). Compose passes the same token to the backend and checker.
@@ -74,7 +79,7 @@ The polling process and `manual_check` use no Python SQL functions or database
 credentials. `manual_check` retrieves targets and Banner snapshots but does not
 submit them; it prints department summaries. `CHECK_INTERVAL` remains the wait
 in seconds after each completed cycle (default 600). Failed Banner fetches,
-empty/invalid snapshots, rejected submissions, and rolled-back transactions do
+malformed snapshots, rejected submissions, and rolled-back transactions do
 not advance synchronization timestamps. A client timeout is ambiguous: Express
 may still commit successfully after the caller stops waiting.
 

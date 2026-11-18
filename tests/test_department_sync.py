@@ -65,6 +65,27 @@ class CheckerAPITests(unittest.TestCase):
                     self.assertIn("authentication failed", str(caught.exception))
                 self.assertNotIn("test-secret-token", "".join(traceback.format_exception(caught.exception)))
 
+    def test_validation_diagnostics_are_structured_and_allowlisted(self):
+        self.response.status_code = 400
+        self.response.raise_for_status.side_effect = requests.HTTPError("unsafe test-secret-token", response=self.response)
+        diagnostic = {"field": "title", "row_index": 1, "reason": "conflicting_title"}
+        self.response.json.return_value = {"error": "test-secret-token", "validation": {
+            **diagnostic, "raw": "test-secret-token"}}
+        with self.assertRaises(requests.HTTPError) as caught:
+            submit_department_snapshot("DS", "202710", self.sections)
+        self.assertEqual(caught.exception.validation, diagnostic)
+        self.assertIn("conflicting_title", str(caught.exception))
+        self.assertNotIn("test-secret-token", "".join(traceback.format_exception(caught.exception)))
+        for value in ({"field": "title", "reason": "test-secret-token", "row_index": 0},
+                      {"field": [], "reason": "invalid_title"},
+                      {**diagnostic, "row_index": True}, {**diagnostic, "row_index": 10000},
+                      None, "test-secret-token"):
+            self.response.json.return_value = {"validation": value}
+            with self.subTest(value=value), self.assertRaises(requests.HTTPError) as caught:
+                submit_department_snapshot("DS", "202710", self.sections)
+            self.assertIsNone(caught.exception.validation)
+            self.assertNotIn("test-secret-token", str(caught.exception))
+
     def test_connection_failure_and_timeout_have_safe_messages(self):
         for error in (requests.ConnectionError, requests.Timeout):
             with self.subTest(error=error):
@@ -123,9 +144,16 @@ class DepartmentSyncTests(unittest.TestCase):
         submit.assert_called_once_with("IT", "202795", parse_all_sections(BANNER))
 
     @patch("src.department_sync.submit_department_snapshot")
-    def test_empty_snapshot_is_not_submitted(self, submit):
-        with self.assertRaisesRegex(ValueError, "No sections found"):
-            sync_department("IT", "202795", data=[])
+    @patch("builtins.print")
+    def test_empty_snapshot_is_submitted(self, output, submit):
+        submit.return_value = {"courses": 0, "sections": 0, "status_changes": 0}
+        sync_department("IT", "202795", data=[])
+        submit.assert_called_once_with("IT", "202795", [])
+
+    @patch("src.department_sync.submit_department_snapshot")
+    def test_malformed_snapshot_is_not_submitted(self, submit):
+        with self.assertRaises(ValueError):
+            sync_department("IT", "202795", data=[{"SECTIONS_TABLE": "upstream error"}])
         submit.assert_not_called()
 
     def test_existing_search_helper_submits_without_database_lock(self):

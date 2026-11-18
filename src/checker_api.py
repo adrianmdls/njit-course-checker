@@ -1,8 +1,37 @@
 """Submit normalized Banner snapshots to the Express backend."""
 
 import os
+import json
 
 import requests
+
+
+# Exact field/reason combinations emitted by Express. Untrusted response text is
+# never included in exceptions, logs, or tracebacks.
+_VALIDATION_REASONS = {
+    "body": {"invalid_body"}, "subject": {"invalid_subject"}, "term": {"invalid_term"},
+    "sections": {"invalid_sections"}, "row": {"invalid_row"},
+    "course": {"invalid_course", "subject_mismatch"},
+    "title": {"invalid_title", "conflicting_title"}, "crn": {"invalid_crn", "conflicting_crn"},
+    "section": {"invalid_section"}, "status": {"invalid_status"},
+    "max_enrollment": {"invalid_enrollment"}, "current_enrollment": {"invalid_enrollment"},
+}
+
+
+def _validation_diagnostic(response):
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    diagnostic = body.get("validation") if isinstance(body, dict) else None
+    if not isinstance(diagnostic, dict):
+        return None
+    field, reason, index = (diagnostic.get(key) for key in ("field", "reason", "row_index"))
+    if (not isinstance(field, str) or not isinstance(reason, str)
+            or reason not in _VALIDATION_REASONS.get(field, set())
+            or (index is not None and (type(index) is not int or not 0 <= index < 10000))):
+        return None
+    return {"field": field, "row_index": index, "reason": reason}
 
 
 def _request(method, path, payload=None):
@@ -26,7 +55,11 @@ def _request(method, path, payload=None):
         message = "Department synchronization failed"
         if status in (401, 403):
             message = "Department synchronization authentication failed; check CHECKER_API_TOKEN"
-        raise requests.HTTPError(f"{message} (HTTP {status}).") from None
+        diagnostic = _validation_diagnostic(error.response) if status == 400 else None
+        detail = " " + json.dumps(diagnostic) if diagnostic else ""
+        safe_error = requests.HTTPError(f"{message} (HTTP {status}).{detail}")
+        safe_error.validation = diagnostic
+        raise safe_error from None
     except requests.RequestException:
         # Do not log request headers, response bodies, or exceptions containing URLs.
         raise requests.RequestException(

@@ -12,9 +12,6 @@ def sync_department(subject, term, data=None):
 
     sections = parse_all_sections(data)
 
-    if not sections:
-        raise ValueError("No sections found. Skipping synchronization.")
-
     result = submit_department_snapshot(subject, term, sections)
     print(
         f"Synchronized {result['courses']} courses and "

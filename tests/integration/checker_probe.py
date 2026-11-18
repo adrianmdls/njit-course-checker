@@ -5,6 +5,7 @@ import importlib.abc
 import io
 import json
 import os
+from pathlib import Path
 import socket
 import sys
 from unittest.mock import patch
@@ -23,6 +24,8 @@ import requests
 from src import checker, manual_check
 from src.checker_api import get_monitoring_targets, submit_department_snapshot
 from src.njit_scraper import parse_all_sections
+
+FIXTURES = json.loads((Path(__file__).resolve().parents[1] / "fixtures/banner-snapshots.json").read_text())
 
 
 def banner(subject, status="OPEN", enrolled=20, section_count=None, mixed=False):
@@ -80,9 +83,10 @@ def run(options):
         if mode == "targets":
             return {"targets": get_monitoring_targets()}
         if mode == "submit":
-            sections = parse_all_sections(banner(options["subject"], options.get("status", "OPEN"),
-                                                options.get("enrolled", 20), options.get("section_count"),
-                                                options.get("mixed", False)))
+            data = (FIXTURES[options["banner_fixture"]] if "banner_fixture" in options else
+                    banner(options["subject"], options.get("status", "OPEN"), options.get("enrolled", 20),
+                           options.get("section_count"), options.get("mixed", False)))
+            sections = parse_all_sections(data)
             return submit_department_snapshot(options["subject"], options["term"], sections)
         calls = []
 
@@ -90,6 +94,8 @@ def run(options):
             calls.append([subject, term])
             if options.get("banner_failure"):
                 raise requests.ConnectionError("Fixture Banner service unavailable")
+            if "banner_fixture" in options:
+                return FIXTURES[options["banner_fixture"]]
             return banner(subject, options.get("status", "OPEN"), options.get("enrolled", 20),
                           options.get("section_count"), options.get("mixed", False))
 
