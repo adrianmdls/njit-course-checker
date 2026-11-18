@@ -117,9 +117,15 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
             disabled={!options?.terms.length}
             onChange={(event) => {
               const code = event.target.value
+              if (code === term) return
+              activeRequest.current?.abort()
+              activeRequest.current = null
               setTerm(code)
-              const available = options.terms.find(entry => entry.code === code)?.departments ?? []
-              setDepartment(current => available.includes(current) ? current : '')
+              setResults(null)
+              setSubmittedFilters(null)
+              setPagination({ limit: 50, offset: 0, total: 0 })
+              setLoading(false)
+              setError('')
             }}
             className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
           >
@@ -140,6 +146,7 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
             className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
           >
             <option value="">All Departments</option>
+            {department && !departments.includes(department) && <option value={department}>{department}</option>}
             {departments.map((subject) => (
               <option key={subject} value={subject}>
                 {subject}
