@@ -200,6 +200,22 @@ test('MariaDB course search with real login, filters, all sort directions, pagin
         { code: '202795', departments: ['CS'] }, { code: '202710', departments: ['CS', 'IT'] },
       ] });
       assert.deepEqual((await pool.query('SELECT * FROM Sections ORDER BY id'))[0], beforeOptions);
+      const previousSearchTerms=process.env.SEARCH_TERMS;
+      let configuredApi;
+      try {
+        process.env.SEARCH_TERMS='["202695","202710"]';
+        configuredApi=await serve(pool);
+        assert.deepEqual(await (await configuredApi.options(cookie)).json(),{terms:[
+          {code:'202695',departments:[]},{code:'202710',departments:['CS','IT']},
+        ]});
+        assert.deepEqual((await pool.query('SELECT * FROM Sections ORDER BY id'))[0],beforeOptions,
+          'configured options preserve all active historical sections');
+      } finally {
+        if(configuredApi) await configuredApi.close();
+        if(previousSearchTerms===undefined) delete process.env.SEARCH_TERMS;
+        else process.env.SEARCH_TERMS=previousSearchTerms;
+      }
+
       const search = async (query = '') => {
         const params = new URLSearchParams({ term: '202710', subject: 'CS' });
         for (const [key, value] of new URLSearchParams(query.replace(/^&/, ''))) params.set(key, value);
@@ -271,3 +287,38 @@ test('MariaDB course search with real login, filters, all sort directions, pagin
       await admin.end();
     }
   });
+
+test('configured search terms retain deployment order and empty terms without historical catalog leakage', async () => {
+  const previous=process.env.SEARCH_TERMS;
+  process.env.SEARCH_TERMS='["202695","202710"]';
+  const calls=[];
+  let rows=[{term:'202710',subject:'CS'},{term:'202690',subject:'IT'}];
+  let api;
+  try {
+    api=await serve(fakePool(async (sql,params)=>{calls.push({sql,params});return [rows];}));
+    assert.equal((await api.options('')).status,401);
+    assert.deepEqual(await (await api.options()).json(),{terms:[
+      {code:'202695',departments:[]},{code:'202710',departments:['CS']},
+    ]});
+    rows=[];
+    assert.deepEqual(await (await api.options()).json(),{terms:[
+      {code:'202695',departments:[]},{code:'202710',departments:[]},
+    ]});
+    assert.ok(calls.every(call=>call.sql.trim().startsWith('SELECT')), 'options never modify historical records');
+  } finally {
+    if(api) await api.close();
+    if(previous===undefined) delete process.env.SEARCH_TERMS; else process.env.SEARCH_TERMS=previous;
+  }
+});
+
+test('invalid SEARCH_TERMS fails configuration validation without echoing its value', () => {
+  const previous=process.env.SEARCH_TERMS;
+  try {
+    for(const raw of ['invalid-private-value','{}','[202710]','["202711"]','["202710","202710"]','["202695","202710","202795"]']) {
+      process.env.SEARCH_TERMS=raw;
+      assert.throws(()=>createCourses({},{}),{message:'SEARCH_TERMS must be a JSON array of at most two distinct Banner term strings'});
+    }
+  } finally {
+    if(previous===undefined) delete process.env.SEARCH_TERMS; else process.env.SEARCH_TERMS=previous;
+  }
+});

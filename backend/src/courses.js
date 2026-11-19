@@ -24,6 +24,17 @@ function validate(params) {
 }
 
 module.exports = function createCourses(pool, auth) {
+  let searchTerms = null;
+  if (process.env.SEARCH_TERMS !== undefined) {
+    try {
+      searchTerms = JSON.parse(process.env.SEARCH_TERMS);
+      if (!Array.isArray(searchTerms) || searchTerms.length > 2 ||
+          searchTerms.some(term => typeof term !== 'string' || !/^\d{4}(10|50|90|95)$/.test(term)) ||
+          new Set(searchTerms).size !== searchTerms.length) throw new Error();
+    } catch {
+      throw new Error('SEARCH_TERMS must be a JSON array of at most two distinct Banner term strings');
+    }
+  }
   const router = express.Router();
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store');
@@ -47,7 +58,10 @@ module.exports = function createCourses(pool, auth) {
       }
       entry.departments.push(subject);
     }
-    res.json({ terms });
+    // Deployment configuration controls visibility; catalog rows only supply departments.
+    const configured = searchTerms?.map(code => ({ code,
+      departments: terms.find(term => term.code === code)?.departments ?? [] }));
+    res.json({ terms: configured ?? terms });
   });
   router.get('/', async (req, res) => {
     const filters = validate(req.query);

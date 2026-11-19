@@ -36,6 +36,8 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const activeRequest = useRef(null)
+  const selection = useRef({ term, department })
+  selection.current = { term, department }
   const selectedTerm = options?.terms.find(entry => entry.code === term)
   const departments = selectedTerm?.departments ?? []
   const canSearch = Boolean(selectedTerm) && departments.includes(department)
@@ -63,8 +65,17 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
         if (!response.ok) throw new Error('Catalog unavailable')
         const data = await response.json()
         if (controller.signal.aborted) return
+        const current = selection.current
+        const nextTerm = data.terms.find(entry => entry.code === current.term) ?? data.terms[0]
+        if (nextTerm?.code !== current.term || !nextTerm?.departments.includes(current.department)) {
+          clearSearch()
+          setDepartment('')
+          setDepartmentText('')
+          setDepartmentOpen(false)
+          setActiveDepartment(-1)
+        }
         setOptions(data)
-        setTerm(current => data.terms.some(entry => entry.code === current) ? current : data.terms[0]?.code ?? '')
+        setTerm(nextTerm?.code ?? '')
       } catch {
         if (!controller.signal.aborted) setOptionsError('Unable to load available terms and departments. Please retry.')
       }
@@ -335,9 +346,10 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
         </div>
       )}
       {options?.terms.length === 0 && <p role="status" className="mt-6 text-slate-500">No searchable local catalog data is available. No active sections are currently stored.</p>}
+      {selectedTerm && !departments.length && <p role="status" className="mt-6 text-slate-500">No searchable departments are available for {termLabel(term)} yet. Course data must be synchronized before searching this term.</p>}
       {loading && <p role="status" className="mt-6 text-slate-500">Loading course sections…</p>}
       {error && <p role="alert" className="mt-6 text-red-600">{error}</p>}
-      {options?.terms.length > 0 && results === null && !loading && !error && (
+      {departments.length > 0 && results === null && !loading && !error && (
         <p className="mt-6 text-slate-500">Choose your filters and search for course sections.</p>
       )}
 

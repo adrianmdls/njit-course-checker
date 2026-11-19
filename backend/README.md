@@ -45,9 +45,15 @@ The disposable pipeline runs `test/auth.test.cjs` against its own random schema;
 
 `GET /api/courses/options` accepts no query parameters and returns, for example,
 `{"terms":[{"code":"202710","departments":["CS","IT"]}]}`. Terms sort newest
-first; departments sort alphabetically. Options use distinct term/subject pairs
+first when SEARCH_TERMS is unset (legacy standalone behavior). Compose maps backend
+`SEARCH_TERMS` to `CHECKER_TERMS`; configured options instead retain that array's
+order, including terms with no catalog rows (`departments: []`). Historical terms
+outside the configured array are hidden from options, without changing records,
+watches, or direct search behavior. Invalid configuration fails backend startup;
+`[]` explicitly exposes no terms. Departments sort alphabetically. Options use distinct term/subject pairs
 from the same joined section/catalog records as search. Unlinked legacy sections
-and courses without sections are excluded. An empty catalog returns
+and courses without sections are excluded from departments. An empty catalog
+retains configured terms with empty department lists. Without SEARCH_TERMS it returns
 `{"terms":[]}`. It shares search authentication, no-store/HTTPS controls and
 sanitized `503` handling; unexpected query parameters return `400`.
 

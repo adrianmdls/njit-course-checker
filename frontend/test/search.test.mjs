@@ -401,3 +401,37 @@ test('filter fields retain native selects with one shared decorative chevron per
   assert.ok(host.find(node=>node.props['aria-label']==='Clear department'))
   host.unmount()
 })
+
+for (const removed of ['term','department']) {
+  test(`configured empty terms remain visible and options refresh clears an invalid ${removed} and pending results`, async () => {
+    let catalog={terms:[{code:'202695',departments:[]},{code:'202710',departments:['CS']}]}
+    const auth={refresh(){}}
+    const searches=[]
+    const harness=await componentHarness(url=>{
+      if(url.endsWith('/options')) return Promise.resolve(reply(200,catalog))
+      const request=deferred();searches.push(request);return request.promise
+    },auth)
+    const host=await harness.mount('../src/components/SearchCourses.jsx','default',{courses:[],watchlistReady:true,pendingId:null})
+    await host.flush()
+    assert.equal(field(host,'search-term').props.value,'202695')
+    assert.equal(field(host,'search-term').props.disabled,false)
+    assert.equal(field(host,'search-department').props.disabled,true)
+    assert.equal(button(host,'Search Courses').props.disabled,true)
+    assert.ok(host.find(node=>node.type==='p' && node.props.children.join('').includes('No searchable departments are available for')))
+    await select(host,'search-term','202710')
+    await select(host,'search-department','CS')
+    submit(host);searches[0].resolve(reply(200,result));await host.flush()
+    button(host,'Next').props.onClick();await host.flush()
+    catalog=removed==='term'?{terms:[{code:'202695',departments:[]}]}:
+      {terms:[{code:'202695',departments:[]},{code:'202710',departments:[]}]}
+    auth.refresh=()=>{}
+    host.render();await host.flush()
+    assert.equal(field(host,'search-term').props.value,removed==='term'?'202695':'202710')
+    assert.equal(field(host,'search-department').props.value,'')
+    assert.equal(button(host,'Search Courses').props.disabled,true)
+    searches[1].resolve(reply(200,result));await host.flush()
+    assert.throws(()=>button(host,'Next'),/Element not found/)
+    assert.throws(()=>button(host,'Add'),/Element not found/)
+    host.unmount()
+  })
+}

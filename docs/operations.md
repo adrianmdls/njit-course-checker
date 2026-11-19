@@ -66,15 +66,19 @@ For one-shot synchronization and deterministic verification, use the
 Authenticated search reads synchronized MariaDB records. Searching an
 unsynchronized department/term returns an empty list and never triggers Banner.
 The UI loads available terms and departments from `/api/courses/options`, chooses
-the newest local term initially, and shows only departments available for the
+the first configured term initially, and shows only departments available for the
 selected term. Select a department before searching; there is no all-department
 search. Changing terms clears an unavailable department selection. Changing the
 term or department clears results and prevents delayed responses from restoring
 the previous search; other filters are preserved.
 Catalog options and searches never initiate synchronization. If no local catalog
 data exists, the form explains this and disables search. Reopen the search tab
-after a synchronization to refresh its options. Existing rows remain searchable
-even when their department/term is no longer actively monitored.
+after a synchronization to refresh its options. Compose maps backend SEARCH_TERMS
+to CHECKER_TERMS. Configured terms remain visible
+even before ingestion; their department selection and search stay disabled until
+active linked catalog records exist. Historical terms are excluded from dropdown
+options, but their rows and watches remain intact and direct searches still work.
+Standalone backend users should set SEARCH_TERMS explicitly to use this policy.
 
 Synchronization preserves omitted sections exactly. A structurally valid Banner
 response can still be incomplete, so omission no longer marks a section inactive.
