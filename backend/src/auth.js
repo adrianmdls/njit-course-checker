@@ -33,23 +33,31 @@ module.exports = async function createAuth(pool) {
     next();
   });
   // Same-origin JSON API: require both a custom header and an exact Origin on mutations.
-  router.use((req, res, next) => {
+  function requireMutation(req, res, next) {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
     if (req.get('Origin') !== origin || req.get('X-Requested-With') !== 'NJIT-Course-Checker') {
       return res.status(403).json({ error: 'Invalid request origin' });
     }
     if (!req.is('application/json')) return res.status(415).json({ error: 'JSON required' });
     next();
-  });
+  }
+  router.use(requireMutation);
   const limiter = (limit, windowMs) => rateLimit({ windowMs, limit, standardHeaders: 'draft-8',
     legacyHeaders: false, message: { error: 'Too many attempts; try again later' } });
   // Run before session access and expensive password hashing.
   router.use('/login', limiter(10, 15 * 60 * 1000));
   router.use('/register', limiter(5, 60 * 60 * 1000));
   router.use(express.json({ limit: '8kb' }));
-  const sessionMiddleware = session({ name: cookieName, secret: process.env.SESSION_SECRET, store,
-    resave: false, saveUninitialized: false, rolling: true, cookie });
-  router.use(sessionMiddleware);
+  const sessionOptions = { name: cookieName, secret: process.env.SESSION_SECRET, store,
+    resave: false, saveUninitialized: false, rolling: true, cookie };
+  const sessionMiddleware = session(sessionOptions);
+  const restoreSession = session({ ...sessionOptions, rolling: false });
+  router.use((req, res, next) => {
+    // A delayed restoration must never replace a cookie issued by a newer login.
+    // Normal authenticated API activity still renews the rolling session cookie.
+    res.locals.restoringSession = ['GET', 'HEAD'].includes(req.method) && /^\/me\/?$/i.test(req.path);
+    (res.locals.restoringSession ? restoreSession : sessionMiddleware)(req, res, next);
+  });
   const fields = 'id, username, email, email_verified, created_at';
   const safeUser = user => ({ ...user, email_verified: Boolean(user.email_verified) });
   const hashOptions = { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 };
@@ -61,7 +69,8 @@ module.exports = async function createAuth(pool) {
     if (!req.session.userId) return res.status(401).json({ error: 'Authentication required' });
     if (Date.now() - req.session.authenticatedAt >= 8 * 60 * 60 * 1000) {
       await changeSession(req, 'destroy');
-      res.clearCookie(cookieName, { ...cookie, maxAge: undefined });
+      // Even an expired restoration can finish after a successful new login.
+      if (!res.locals.restoringSession) res.clearCookie(cookieName, { ...cookie, maxAge: undefined });
       return res.status(401).json({ error: 'Session expired' });
     }
     const [users] = await pool.execute(`SELECT ${fields} FROM Users WHERE id = ?`, [req.session.userId]);
@@ -113,7 +122,7 @@ module.exports = async function createAuth(pool) {
     res.sendStatus(204);
   });
   router.get('/me', requireAuth, (req, res) => res.json({ user: req.user }));
-  return { router, sessionMiddleware, requireAuth, async close() {
+  return { router, sessionMiddleware, requireAuth, requireMutation, async close() {
     clearInterval(cleanup);
     await store.close();
   } };

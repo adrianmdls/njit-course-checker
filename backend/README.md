@@ -2,6 +2,14 @@
 
 Express provides authentication, course search, internal Banner snapshot ingestion, and a database health check. Nginx forwards `/api/` requests to `backend:3000`, and Express uses a shared mysql2 connection pool to reach MariaDB at `db:3306` over the Compose network. The backend has no published host port.
 
+Checker ingestion at `/api/internal/sync/department` accepts JSON bodies up to
+5 MiB (5,242,880 bytes), with matching Nginx and Express limits. Oversized bodies
+return `413`; accepted sizes still require the checker Bearer token and whole-body
+validation. Other proxy routes retain Nginx's 1 MiB limit; Express additionally
+limits auth JSON to 8 KiB and watchlist JSON to 1 KiB. The disposable pipeline tests
+the built Nginx image with large valid observations, the exact ingestion boundary,
+oversized rejection, credentials, validation, and unchanged public-route limits.
+
 For installation, environment setup, and database initialization, see the [root README](../README.md).
 
 ## API Endpoints
@@ -14,7 +22,7 @@ For installation, environment setup, and database initialization, see the [root 
 | POST | `/api/auth/logout` | `{}`; destroys the session and clears the cookie (`204`) |
 | GET | `/api/auth/me` | Returns the current user (`200`) or unauthenticated/expired session (`401`) |
 | GET | `/api/courses/options` | Session-authenticated locally available terms and departments (`200`) |
-| GET | `/api/courses` | Session-authenticated section search; requires `term`, returns sections and pagination (`200`) |
+| GET | `/api/courses` | Session-authenticated section search; requires `term` and `subject`, returns sections and pagination (`200`) |
 | GET | `/api/internal/sync/targets` | Bearer-authenticated unique Watchlist and explicit subject/term pairs (`200`) |
 | POST | `/api/internal/sync/department` | Bearer-authenticated department snapshot; returns processed course, section, and status-change counts (`200`) |
 
@@ -22,13 +30,30 @@ Registration requires a username of 3–50 letters, digits, or underscores and a
 
 Authentication POST requests require JSON, an `Origin` matching `APP_ORIGIN`, and `X-Requested-With: NJIT-Course-Checker`. The React request helper supplies the application headers; the browser supplies Origin.
 
+Session restoration (`GET`/`HEAD /api/auth/me`) never issues or clears a session
+cookie, including on expiration. This prevents a delayed restoration response
+from overwriting the regenerated cookie from a newer login. Login still destroys
+the previous session ID; logout destroys the session and clears its cookie.
+Ordinary authenticated course/watchlist requests still renew the rolling
+30-minute cookie and store expiry. Restoration alone does not extend the browser
+cookie's lifetime. The eight-hour authentication-age limit, production Secure
+host-only cookie, HttpOnly/SameSite flags and mutation protections remain in force.
+The disposable pipeline runs `test/auth.test.cjs` against its own random schema;
+`RUN_BROWSER_TESTS=1` also checks both response orders in Chrome's actual cookie jar.
+
 ## Course search
 
 `GET /api/courses/options` accepts no query parameters and returns, for example,
 `{"terms":[{"code":"202710","departments":["CS","IT"]}]}`. Terms sort newest
-first; departments sort alphabetically. Options use distinct term/subject pairs
+first when SEARCH_TERMS is unset (legacy standalone behavior). Compose maps backend
+`SEARCH_TERMS` to `CHECKER_TERMS`; configured options instead retain that array's
+order, including terms with no catalog rows (`departments: []`). Historical terms
+outside the configured array are hidden from options, without changing records,
+watches, or direct search behavior. Invalid configuration fails backend startup;
+`[]` explicitly exposes no terms. Departments sort alphabetically. Options use distinct term/subject pairs
 from the same joined section/catalog records as search. Unlinked legacy sections
-and courses without sections are excluded. An empty catalog returns
+and courses without sections are excluded from departments. An empty catalog
+retains configured terms with empty department lists. Without SEARCH_TERMS it returns
 `{"terms":[]}`. It shares search authentication, no-store/HTTPS controls and
 sanitized `503` handling; unexpected query parameters return `400`.
 
@@ -41,7 +66,7 @@ Production requires HTTPS through the trusted proxy.
 | Parameter | Values |
 |---|---|
 | `term` | Required six-digit Banner code ending in `10`, `50`, `90`, or `95` (Winter) |
-| `subject` | Optional uppercase department code, starting with a letter, at most 10 alphanumeric characters |
+| `subject` | Required uppercase department code, starting with a letter, at most 10 alphanumeric characters |
 | `query` | Optional course number prefix, such as `280`, or full code, such as `CS 280`; case and whitespace are normalized |
 | `status` | Optional stored `OPEN`, `CLOSED`, or `CANCELLED` status |
 | `sort` | `course` (default), `crn`, or `availability` |
@@ -50,7 +75,8 @@ Production requires HTTPS through the trusted proxy.
 | `offset` | Integer from 0 to 2147483647; default 0 |
 
 Unknown parameters, duplicate parameters, invalid values, and conflicting
-subjects in `subject` and `query` return `400`. A course number prefix starts
+subjects in `subject` and `query` return `400`. A full course query does not
+replace the required `subject` parameter. A course number prefix starts
 with a digit and contains at most 20 alphanumeric characters; raw queries are
 limited to 100 characters. Pagination accepts decimal digits only.
 
@@ -58,8 +84,8 @@ Examples using a cookie jar saved during login:
 
 ```sh
 curl -b cookies.txt 'http://localhost:8080/api/courses?term=202710&subject=CS'
-curl -b cookies.txt 'http://localhost:8080/api/courses?term=202795&query=CS%20280&status=OPEN'
-curl -b cookies.txt 'http://localhost:8080/api/courses?term=202710&sort=availability&order=desc&limit=20&offset=20'
+curl -b cookies.txt 'http://localhost:8080/api/courses?term=202795&subject=CS&query=CS%20280&status=OPEN'
+curl -b cookies.txt 'http://localhost:8080/api/courses?term=202710&subject=CS&sort=availability&order=desc&limit=20&offset=20'
 ```
 
 The response is `{ "sections": [...], "pagination": { "limit": 50, "offset": 0,
@@ -77,11 +103,49 @@ final tie-breaker and apply the requested direction to every tie-breaker.
 Missing, invalid, or expired sessions return `401`; database failures return a
 sanitized `503`. Searches never request data from Banner.
 
+## Persistent watchlists
+
+All three routes reuse the existing session middleware and user lookup. Checker
+Bearer tokens do not authenticate these routes. Responses use `Cache-Control:
+no-store`; production requires HTTPS through the trusted proxy.
+
+| Method | Path | Behavior |
+|---|---|---|
+| GET | `/api/watchlist` | `200 {"sections": [...]}` for the current user; empty arrays are valid. |
+| POST | `/api/watchlist` | JSON `{"section_id": 123}`; `201 {"section_id": 123}`, duplicate `409`, nonexistent section `404`. |
+| DELETE | `/api/watchlist/:sectionId` | `204` on removal, `404` if the current user has no such watch. Send an empty JSON object. |
+
+Mutations require an exact `Origin`, `X-Requested-With: NJIT-Course-Checker` and
+`Content-Type: application/json`, reusing auth protections. Invalid origins or
+headers return `403`, non-JSON mutations `415`, malformed JSON `400`, and JSON
+bodies over 1 KiB `413`. Authentication failures return `401` before watchlist
+queries. Invalid IDs/body fields or any query parameters return `400`.
+
+POST section IDs must be JSON integers from 1 to 4294967295. DELETE path IDs use
+canonical positive decimal digits in the same range. User IDs are never accepted;
+unknown fields, including `user_id`, are rejected. All database values are bound
+parameters, and deletion always includes the authenticated owner. A `404` does
+not reveal whether another user's watch exists. Database failures are sanitized
+by the existing server error handler.
+
+List rows contain `section_id`, `course`, `title`, `subject`, `crn`, `term`,
+`section`, `max`, `now`, `status`, boolean `is_active` and UTC ISO `last_checked_at`. Nullable values
+stay null. Status is stored status rather than an inference from available seats.
+Legacy sections without a course link remain visible using their saved label or
+subject; no placeholder Course rows are created.
+
+The existing unique `(user_id, section_id)` key prevents concurrent duplicates.
+Insertion checks section existence in the same SQL statement. No additional
+Watchlists table changes are required. The watched-only internal targets endpoint immediately reflects
+committed additions/removals across all users. Removing one user's watch does
+not demote a pair still watched elsewhere. Scheduler term/allowlist filtering and
+polling times are unchanged. See [Phase 3 notes](../docs/phase-3-watchlists.md).
+
 ## Internal department synchronization
 
 Set a separate, random `CHECKER_API_TOKEN` (generate with `openssl rand -hex 32`). Compose passes it to the backend. An unset/empty token disables ingestion with `503`, without disabling the rest of the backend. Recreate the backend container after changing the token. Send `Authorization: Bearer <CHECKER_API_TOKEN>` and `Content-Type: application/json`. Production requires HTTPS through the trusted proxy. Keep the token out of browser code, URLs, and logs.
 
-The endpoint uses machine credentials independently of browser sessions. It does not accept cookies as authentication or require browser Origin/CSRF headers; the existing `/api/auth` protections remain in effect. Token digests are compared with Node's timing-safe comparison, including for tokens with different lengths. Authentication runs before JSON parsing or database access. Bodies are limited to 5 MiB and 10,000 section entries.
+The endpoint uses machine credentials independently of browser sessions. It does not accept cookies as authentication or require browser Origin/CSRF headers; the existing `/api/auth` protections remain in effect. Token digests are compared with Node's timing-safe comparison, including for tokens with different lengths. Authentication runs before JSON parsing or database access. Bodies are limited to 5 MiB and 10,000 section entries (zero entries are allowed).
 
 ```json
 {
@@ -101,9 +165,11 @@ The endpoint uses machine credentials independently of browser sessions. It does
 }
 ```
 
-`sections` uses the existing `parse_all_sections()` field names. Other scraper fields are ignored. Only an exact matching `course + " - "` prefix is removed from a title; other title text is preserved. Subject must be uppercase alphanumeric, start with a letter, and contain at most 10 characters. Term is a six-digit string with Banner suffix `10`, `50`, `90`, or `95` (Winter), matching the existing checker. Course identifiers use `SUBJECT NUMBER`, separated by whitespace; the number starts with a digit and contains at most 20 uppercase alphanumeric characters. The course subject must match the snapshot. CRNs are five-digit strings. Titles and section labels must be nonempty and fit their schema limits of 255 and 20 characters. Enrollment values are nonnegative unsigned 32-bit integers; over-enrollment is allowed. Status must be `OPEN`, `CLOSED`, or `CANCELLED`. Empty snapshots, conflicting course titles, and conflicting duplicate CRNs are rejected. Identical duplicate CRNs count once.
+Validation failures include fixed `validation.field`, zero-based `validation.row_index` (null for envelope errors), and `validation.reason` diagnostics; raw values are never echoed. See [Phase 1 notes](../docs/phase-1-sync.md) for parser and allowlist verification limits.
 
-No capture timestamp is required; `snapshot_started_at` is ignored if supplied. The department lock prevents overlapping writes, but does **not** detect out-of-order snapshots. The polling caller must fetch and submit each snapshot sequentially, waiting for completion before the next fetch. If submission fails or times out, finish retrying that snapshot before sending another, or discard it and fetch a fresh snapshot. Do not send delayed retries after submitting newer data. Parallel producers would require snapshot ordering protection in a later change. No schema migration is required.
+`sections` uses the existing `parse_all_sections()` field names. Other scraper fields are ignored. Titles are trimmed and whitespace runs collapse to one space before removing a matching normalized `SUBJECT NUMBER - ` prefix; other text, case and punctuation are preserved. Each course uses the normalized title of its lowest-CRN section, independent of input order. Different valid titles across distinct CRNs are accepted. Subject must be uppercase alphanumeric, start with a letter, and contain at most 10 characters. Term is a six-digit string with Banner suffix `10`, `50`, `90`, or `95` (Winter), matching the existing checker. Course identifiers use `SUBJECT NUMBER`, separated by whitespace; the number starts with a digit and contains at most 20 uppercase alphanumeric characters. The course subject must match the snapshot. CRNs are five-digit strings. Titles and section labels must be nonempty and fit their schema limits of 255 and 20 characters. Enrollment values are nonnegative unsigned 32-bit integers; over-enrollment is allowed. Status must be `OPEN`, `CLOSED`, or `CANCELLED`. Empty arrays are accepted as nondestructive successful synchronization: only the department completion timestamp changes. Conflicting duplicate CRNs, including different normalized titles, are rejected. Duplicates that agree after normalization count once. Every supplied title must still be nonempty and fit the 255-character limit after normalization.
+
+No capture timestamp is required; `snapshot_started_at` is ignored if supplied. The department lock prevents overlapping writes, but does **not** detect out-of-order snapshots. The polling caller must fetch and submit each snapshot sequentially, waiting for completion before the next fetch. If submission fails or times out, finish retrying that snapshot before sending another, or discard it and fetch a fresh snapshot. Do not send delayed retries after submitting newer data. Parallel producers would require snapshot ordering protection in a later change.
 
 Example response:
 
@@ -111,7 +177,24 @@ Example response:
 {"courses":1,"sections":1,"status_changes":0}
 ```
 
-Counts refer to unique supplied courses/sections. New sections do not count as status changes. For existing sections, any different stored status (including NULL) counts once. Repeated identical requests report zero status changes, create no duplicate records, and refresh `last_checked_at` and `last_synced_at`. Courses upsert by `(subject, course_number)` and sections by `(term, crn)`. Existing section IDs and Watchlist references survive; watched and unwatched sections receive the same updates, including legacy rows with a NULL course link. A CRN already owned by another subject in that term returns `409`. Sections missing from a snapshot are retained; absence does not imply cancellation.
+Counts refer to unique supplied courses/sections. New or reactivated sections do not count as status changes. For already active sections, any different stored status (including NULL) counts once. Repeated identical requests report zero status changes, create no duplicate records, and refresh observed sections' `last_checked_at` and department `last_synced_at`. Courses upsert by `(subject, course_number)` and sections by `(term, crn)`. Existing section IDs and Watchlist references survive; watched and unwatched sections receive the same updates, including legacy rows with a NULL course link. A CRN already owned by another subject in that term returns `409`.
+
+Accepted nonempty responses update and reactivate only explicitly observed sections.
+Omitted rows are preserved exactly, including IDs, activity, status, enrollment,
+course links, timestamps and watches. Structural validation cannot establish Banner
+completeness, so absence never causes deactivation. Historical statuses can become
+stale; `last_checked_at` is the section's last observation, and department
+`last_synced_at` records accepted work rather than a proven complete inventory.
+Empty snapshots retain their existing nondestructive behavior. Search/counts/catalog options
+exclude inactive sections; watchlists include them and both APIs expose boolean
+`is_active`. Inactive watched sections still contribute monitoring targets.
+Existing inactive rows remain inactive until explicitly observed again. This
+policy adds no schema, generation tracking or completeness flag. Future notification
+eligibility still requires independently established completeness; aggregate counts
+and department timestamps do not provide that evidence.
+See [activity behavior and the required existing-volume migration](../docs/section-activity.md).
+Obsolete experimental generation columns have a separate, optional
+[forward-only cleanup migration](../docs/snapshot-generation-cleanup.md).
 
 All writes and the successful `DepartmentSyncs.last_synced_at` completion timestamp share one transaction. A MariaDB advisory lock named `njit:sync:<subject>:<term>` rejects overlapping API requests with `409` across backend instances. Row locks protect comparisons and updates; the advisory lock is released before returning the connection to the pool. Database failures roll back the transaction and return `503` through the backend error handler. Other responses include `400` for invalid input/JSON, `401` for invalid credentials, `413` for oversized JSON, and `415` for a non-JSON content type.
 
@@ -123,7 +206,12 @@ It returns, for example:
 {"targets":[{"subject":"IT","term":"202795"}]}
 ```
 
-Targets merge distinct Watchlist subject/term pairs with the backend-only
+With `?watched_only=true`, the same endpoint returns only distinct database
+Watchlist subject/term pairs. The scheduled checker uses this filter, then limits
+pairs to its configured terms and NJIT allowlist. Other query values, duplicate
+parameters and unknown keys return `400` before accessing the database.
+
+Without a query, targets retain the backwards-compatible merge of distinct Watchlist subject/term pairs with the backend-only
 `CHECKER_MONITORING_TARGETS` JSON array (default `[]`). Duplicates collapse to one
 pair; NULL course links and catalog presence do not imply monitoring. An empty
 result is `{ "targets": [] }`. The endpoint does not write data. Explicit target
@@ -142,10 +230,10 @@ Run `cd backend && npm test` for authentication and validation tests. Database t
 
 ```sh
 cd backend
-TEST_DB_PORT=<disposable-database-port> npm test
+TEST_DB_PORT=<disposable-database-port> node --test --test-concurrency=1 test/*.test.cjs
 ```
 
-Use a fresh database for each run; the suite creates schema, users, Watchlists, and a failure-injection trigger. Never point these tests at an application database. The full suite checks real MariaDB upserts, section ID preservation, watched/unwatched updates, status changes, rollback of existing and new records, completion timestamp rollback, retries, caller-controlled snapshot ordering, Winter terms, subject collisions, and lock contention. It uses Node's test runner and existing dependencies.
+Run the database suites serially on a shared disposable server: synchronization advisory locks are server-wide even when tests use separate schemas. Use a fresh database for each run; the suite creates schema, users, Watchlists, and a failure-injection trigger. Never point these tests at an application database. The full suite checks real MariaDB upserts, section ID preservation, watched/unwatched updates, status changes, rollback of existing and new records, completion timestamp rollback, retries, caller-controlled snapshot ordering, Winter terms, subject collisions, and lock contention. It uses Node's test runner and existing dependencies.
 
 Course search tests additionally cover session authentication, invalid parameters
 and injection attempts, normalized prefixes and full course codes, filters,

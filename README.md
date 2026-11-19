@@ -8,19 +8,34 @@ The frontend sends `/api/` requests through Nginx to Express, which connects to 
 
 - Account registration, login/logout, and session-based access to the dashboard.
 - Express database health endpoint and authentication API.
-- Sequential Python polling of watched and explicitly configured departments, with persistence and status-change detection in Express.
+- Half-hourly department rotation and ten-minute watched synchronization, sharing sequential Banner access and Express persistence.
 - Authenticated course-section search with term, department, course-prefix and status filters, sorting, and pagination.
 
 React searches existing MariaDB records through `GET /api/courses`, using the
 same session cookie as login. Search never fetches Banner or starts a sync.
-Unsynchronized department/term combinations return no results.
+Unsynchronized department/term combinations return no results. Search and catalog
+options exclude inactive sections; existing watches retain them as Unavailable.
+See [section activity and migration instructions](docs/section-activity.md) before
+deploying against an existing database volume. Accepted responses update only
+observed sections. Omitted sections, including their activity/status and last-seen
+timestamps, remain unchanged because Banner completeness is unverified. Historical
+statuses can therefore become stale; absence is not evidence of removal or closure.
+Empty snapshots also preserve activity. No new migration is needed for this policy.
 
-The watchlist still uses local React state initialized with mock records. Add,
-remove, and notification toggles are demo controls; they do not persist or update
-backend Watchlists. Configure explicit monitoring targets to populate search
-results in a fresh installation. Automatic notifications are not implemented.
+Watchlists persist in MariaDB for the authenticated user. Search results show
+whether each database section is already watched; Add and Remove use the session-
+authenticated `/api/watchlist` API. Watched subject/term pairs enter the existing
+priority synchronization targets and leave when their last watch is removed.
+Configure one or two checker terms to populate search results naturally through
+department rotation. Automatic notifications are not implemented.
+See [Phase 3 watchlists](docs/phase-3-watchlists.md) for the API and verification.
 
 ## Banner department synchronization
+
+Phase 1 hardening, department-list provenance, empty-response semantics and
+remaining verification limits are documented in [the stabilization notes](docs/phase-1-sync.md).
+Validated empty arrays now record nondestructive successful synchronization;
+unrecognized empty markup remains an error.
 
 Department snapshots now follow Banner → Python → Express → MariaDB. Set
 `CHECKER_API_TOKEN` in `.env` to a separate random secret (generate with
@@ -35,53 +50,51 @@ Python parses Banner snapshots and submits them to Express, which handles
 validation, transactions, upserts, and locking. The standalone
 `sync_department(subject, term, data=None)` helper uses the same HTTP API.
 
-The checker retrieves `{targets: [{subject, term}]}` from
-`GET /api/internal/sync/targets`, then fetches, parses, and submits a complete
-Banner snapshot for each pair in sequence. Express derives targets from
-Watchlists plus the backend-only `CHECKER_MONITORING_TARGETS` JSON setting:
+Set `CHECKER_TERMS` to a JSON array of one or two distinct Banner term strings,
+for example `CHECKER_TERMS='["202690","202710"]'`. Missing/invalid configuration
+prevents checker startup. There is no automatic term discovery or startup import.
 
-```dotenv
-CHECKER_MONITORING_TARGETS='[{"subject":"IT","term":"202690"},{"subject":"CS","term":"202690"}]'
-```
+Two threads in the checker run independent wall-clock loops:
 
-The default is `[]`: watchlists alone determine polling. Multiple watched
-sections/users in the same department/term produce one target. Explicit targets
-remain active even without Watchlists or after ingestion creates course links.
-Changing the configuration requires recreating the backend container. Invalid
-configuration prevents backend startup without logging its contents.
+- At **:00 and :30**, take the next subject from `src/departments.json` and sync
+  each configured term unless that exact subject/term pair is watched. Advance
+  once per executed slot, even if both terms are watched or a request fails.
+- At **:05, :15, :25, :35, :45 and :55**, retrieve actual Watchlist pairs from
+  `GET /api/internal/sync/targets?watched_only=true`, deduplicate and filter to
+  NJIT subjects and configured terms, then sync each pair. Membership is checked
+  again immediately before each fetch. Demoted pairs resume normal rotation.
 
-**Before upgrading a legacy database**, explicitly list every manually monitored
-department/term you want to retain. The schema has no monitoring flag, and NULL
-`course_id` values do not reliably identify intent. Inspect candidates using this
-read-only query and compare them with your known monitoring configuration:
+One condition gate serializes Banner fetching, strict parsing and Express submission.
+A due regular slot takes priority before the next watched request; an active
+watched request may finish first.
+`BANNER_REQUEST_DELAY` defaults to 5 seconds and cannot be smaller: it is the
+minimum pause after a Banner request completes or fails before the next starts.
+An active batch finishes; ticks missed while it runs are skipped, without queued
+catch-up or aggressive retries. For 82 departments, an uninterrupted rotation
+requires 41 hours. Large watched batches or slow requests can exceed ten minutes;
+pacing and serialization take precedence. See [scheduler details](docs/phase-2-sync.md).
 
-```sql
-SELECT DISTINCT s.subject, s.term
-FROM Sections s
-WHERE s.course_id IS NULL
-  AND NOT EXISTS (SELECT 1 FROM Watchlists w WHERE w.section_id = s.id);
-```
+`data/rotation.json` stores the next subject and last completed regular slot using
+atomic replacement and fsync. The cursor advances after all configured terms
+have been handled, including watched exclusions and individual failures. A crash
+or interruption mid-slot preserves the prior cursor for a safe idempotent retry.
+Corrupt state is preserved and halts scheduling without a Docker restart loop;
+see the [cursor recovery procedure](docs/phase-2-sync.md#cursor-recovery). A held
+`data/checker.lock` prevents another checker using the same data directory.
+Preserve this directory and use only one checker deployment.
 
-Do not automatically classify every candidate as monitored. Previously linked
-legacy rows cannot be recovered from this query; consult your configuration or
-backups as needed. The retired `courses.json` sample used term `202690` (Fall
-2026), CRN `94353` (`IT 610-101`), and CRN `91923` (`CS 288-005`). These are
-historical examples, not current targets; the department/term equivalents appear
-in the configuration example above. Moving monitoring configuration to explicit
-targets requires no schema migration.
+The existing targets endpoint without the filter still merges Watchlists and
+backend `CHECKER_MONITORING_TARGETS` for legacy one-shot/manual callers. Explicit
+monitoring targets do not receive scheduled priority unless actually watched.
+NULL course links and catalog presence never imply a watch.
 
-The polling process and `manual_check` use no Python SQL functions or database
-credentials. `manual_check` retrieves targets and Banner snapshots but does not
-submit them; it prints department summaries. `CHECK_INTERVAL` remains the wait
-in seconds after each completed cycle (default 600). Failed Banner fetches,
-empty/invalid snapshots, rejected submissions, and rolled-back transactions do
-not advance synchronization timestamps. A client timeout is ambiguous: Express
-may still commit successfully after the caller stops waiting.
-
-Run only one checker instance. Submissions are synchronous, with no automatic
-retries, background workers, or queues. Do not run standalone synchronization or
-search-cache refreshes against the same departments concurrently: advisory locks
-prevent overlapping writes but do not detect out-of-order snapshots.
+`manual_check` remains a separate one-shot command that fetches Banner without
+submitting, changing the rotation or sending notifications. Standalone commands
+are outside the scheduler's in-process request lock: do not run them alongside
+the automated checker. Neither the checker nor manual checks need SQL credentials.
+Failed fetches, malformed snapshots, rejected submissions and rollbacks do not
+advance successful database synchronization timestamps. A client timeout remains
+ambiguous: Express may finish committing after the client stops waiting.
 
 Express now owns status comparisons and returns aggregate change counts. Python
 logs department summaries; its previous per-section Discord transition
@@ -111,7 +124,7 @@ njit-course-checker/
 ├── database/
 │   ├── init/          # Initial database schema
 │   └── migrations/    # Additional schema changes
-├── data/              # Persistent checker logs (excluded from Git)
+├── data/              # Persistent checker logs and rotation cursor (excluded from Git)
 ├── docs/operations.md
 ├── compose.yaml
 └── .env.example
@@ -131,7 +144,7 @@ Requires Git, Docker with Compose v2, and internet access to build images. Host 
 
 2. Edit `.env` and set distinct `DB_ROOT_PASSWORD` and `DB_PASSWORD` values, plus separate `SESSION_SECRET` and `CHECKER_API_TOKEN` secrets. Generate each secret with `openssl rand -hex 32` (requires OpenSSL), then paste the result into `.env`.
 
-   Keep the local defaults `APP_ENV=development`, `APP_ORIGIN=http://localhost:8080`, and `API_SCHEME=http`. Set `CHECKER_MONITORING_TARGETS` to the departments/terms you want synchronized; its default `[]` leaves a fresh installation idle. `CHECK_INTERVAL` defaults to 600 seconds. Never commit `.env`, and keep the session secret stable across restarts. Local HTTP settings are for local use; production requires HTTPS.
+   Keep the local defaults `APP_ENV=development`, `APP_ORIGIN=http://localhost:8080`, and `API_SCHEME=http`. Set `CHECKER_TERMS` to one or two term strings, for example `'["202690","202710"]'`; its default `[]` deliberately fails startup until terms are chosen. `BANNER_REQUEST_DELAY` defaults to 5 seconds. `CHECK_INTERVAL` is retired. Never commit `.env`, and keep the session secret stable across restarts. Local HTTP settings are for local use; production requires HTTPS.
 
 3. Build and start the services:
 

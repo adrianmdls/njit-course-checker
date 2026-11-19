@@ -1,0 +1,94 @@
+{
+  "valid": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Introduction to Big Data</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
+  ],
+  "empty": [],
+  "conflicting_titles": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Introduction to Big Data</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table><h4 id=\"DS 644\">Different course title</h4><table class=\"sections-table\"><tr><td>H01</td><td>01235</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
+  ],
+  "missing_table": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">Introduction</h4>"
+    }
+  ],
+  "partial": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Introduction to Big Data</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table><h4 id=\"DS 650\">Another course</h4>"
+    }
+  ],
+  "truncated": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Introduction to Big Data</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr>"
+    }
+  ],
+  "unexpected_empty_markup": [
+    {
+      "SECTIONS_TABLE": "<p>No courses found</p>"
+    }
+  ],
+  "invalid_status": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Introduction to Big Data</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>PRIVATE-UNSUPPORTED-VALUE</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
+  ],
+  "invalid_crn": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Introduction to Big Data</h4><table class=\"sections-table\"><tr><td>H01</td><td>1234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
+  ],
+  "invalid_enrollment": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Introduction to Big Data</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>-1</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
+  ],
+  "unexpected_course": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644-001\">DS 644 - Introduction to Big Data</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
+  ],
+  "invalid_envelope": {
+    "error": "upstream failure"
+  },
+  "unmatched_table": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Introduction to Big Data</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table><table class=\"sections-table\"><tr><td>unexpected</td></tr></table>"
+    }
+  ],
+  "conflicting_duplicate_crn_titles": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Introduction to Big Data</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table><h4 id=\"DS 644\">Different course title</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
+  ],
+  "preservation_full": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Test Course</h4><table class=\"sections-table\"><tr><td>001</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>20</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr><tr><td>001</td><td>01235</td><td>M</td><td>10:00</td><td>CKB</td><td>CLOSED</td><td>40</td><td>40</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table><h4 id=\"DS 650\">DS 650 - Test Course</h4><table class=\"sections-table\"><tr><td>001</td><td>02234</td><td>M</td><td>10:00</td><td>CKB</td><td>CANCELLED</td><td>0</td><td>0</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
+  ],
+  "preservation_missing_row": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Test Course</h4><table class=\"sections-table\"><tr><td>001</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>CLOSED</td><td>30</td><td>30</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table><h4 id=\"DS 650\">DS 650 - Test Course</h4><table class=\"sections-table\"><tr><td>001</td><td>02234</td><td>M</td><td>10:00</td><td>CKB</td><td>CANCELLED</td><td>0</td><td>0</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
+  ],
+  "preservation_missing_course": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Test Course</h4><table class=\"sections-table\"><tr><td>001</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>CLOSED</td><td>30</td><td>30</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr><tr><td>001</td><td>01235</td><td>M</td><td>10:00</td><td>CKB</td><td>CLOSED</td><td>40</td><td>40</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
+  ],
+  "preservation_full_items": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Test Course</h4><table class=\"sections-table\"><tr><td>001</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>20</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr><tr><td>001</td><td>01235</td><td>M</td><td>10:00</td><td>CKB</td><td>CLOSED</td><td>40</td><td>40</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    },
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 650\">DS 650 - Test Course</h4><table class=\"sections-table\"><tr><td>001</td><td>02234</td><td>M</td><td>10:00</td><td>CKB</td><td>CANCELLED</td><td>0</td><td>0</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
+  ],
+  "preservation_missing_item": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Test Course</h4><table class=\"sections-table\"><tr><td>001</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>CLOSED</td><td>30</td><td>30</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr><tr><td>001</td><td>01235</td><td>M</td><td>10:00</td><td>CKB</td><td>CLOSED</td><td>40</td><td>40</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
+  ]
+}

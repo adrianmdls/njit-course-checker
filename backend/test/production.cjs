@@ -36,6 +36,11 @@ const createAuth = require('./src/auth');
     assert.match(cookie, /; HttpOnly/);
     assert.match(cookie, /; SameSite=Lax/);
     assert.doesNotMatch(cookie, /Domain=/);
+    const restored = await fetch(`${url}/me`, { headers: {
+      'X-Forwarded-Proto': 'https', Cookie: cookie.split(';')[0],
+    } });
+    assert.equal(restored.status, 200);
+    assert.deepEqual(restored.headers.getSetCookie(), []);
     console.log('PASS: production rejects HTTP/insecure configuration; HTTPS proxy login sets secure host-only HttpOnly SameSite cookie');
   } finally {
     await pool.execute('DELETE FROM sessions WHERE JSON_EXTRACT(data, "$.userId")=(SELECT id FROM Users WHERE username=?)', [username]);
