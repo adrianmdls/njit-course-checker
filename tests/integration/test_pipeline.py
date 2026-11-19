@@ -7,8 +7,13 @@ Host Python uses the standard library; checker SQL inspection runs in the backen
 import json
 import os
 from pathlib import Path
+import selectors
+import signal
 import subprocess
 import socket
+import sys
+import tempfile
+import time
 import unittest
 import uuid
 
@@ -23,6 +28,57 @@ pool.execute(process.argv[1], JSON.parse(process.argv[2]))
   .finally(() => pool.end());"""
 WATCHED_PAIRS = [["CS", "202710"], ["IT", "202795"]]
 INITIAL_COUNTS = [(1, 2, 1), (2, 2, 1)]
+
+
+def signal_browser_group(group, signum):
+    try:
+        os.killpg(group, signum)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        # macOS reports EPERM when only exited children remain in the group.
+        # The caller still waits for the group leader with a deadline.
+        if sys.platform != "darwin":
+            raise
+
+
+def run_browser(command, identity, *, timeout, terminate_grace=2):
+    with tempfile.TemporaryDirectory(prefix="njit-browser-test-") as profile, \
+         tempfile.TemporaryFile(mode="w+", encoding="utf-8") as request:
+        json.dump({**identity, "profile": os.path.abspath(profile)}, request)
+        request.seek(0)
+        helper = subprocess.Popen(command, stdin=request, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, start_new_session=True)
+        output = bytearray()
+        finished = False
+        try:
+            deadline = time.monotonic() + timeout
+            with selectors.DefaultSelector() as selector:
+                selector.register(helper.stdout, selectors.EVENT_READ)
+                while deadline > time.monotonic():
+                    if not selector.select(max(0, deadline - time.monotonic())):
+                        continue
+                    chunk = os.read(helper.stdout.fileno(), 65536)
+                    if not chunk:
+                        finished = True
+                        break
+                    output.extend(chunk)
+            if not finished:
+                raise subprocess.TimeoutExpired(command, timeout, output=bytes(output))
+        finally:
+            # Keep the child unreaped until signaling is finished so its process
+            # group ID cannot be reused. Chrome and its workers inherit this group.
+            try:
+                if not finished:
+                    signal_browser_group(helper.pid, signal.SIGTERM)
+                    time.sleep(terminate_grace)
+            finally:
+                try:
+                    signal_browser_group(helper.pid, signal.SIGKILL)
+                finally:
+                    helper.stdout.close()
+                    helper.wait(timeout=5)
+        return subprocess.CompletedProcess(command, helper.returncode, output.decode(errors="replace"))
 
 
 class PipelineTests(unittest.TestCase):
@@ -69,11 +125,11 @@ class PipelineTests(unittest.TestCase):
                                        input=json.dumps({"mode": mode, **options})))
 
     def verify_browser(self, empty=False):
-        browser = subprocess.run(["node", str(ROOT / "tests/integration/course_search_browser.mjs"),
-                                  f"http://127.0.0.1:{self.http_port}", "empty" if empty else "catalog"], text=True,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
-                                 env=dict(os.environ, INTEGRATION_BACKEND_CONTAINER=self.command("ps", "-q", "backend").strip()))
-        self.assertEqual(browser.returncode, 0, browser.stdout + browser.stderr)
+        command = ["node", str(COMPOSE.with_name("course_search_browser.mjs")),
+                   f"http://127.0.0.1:{self.http_port}", "empty" if empty else "catalog"]
+        identity = {"backendContainer": self.command("ps", "-q", "backend").strip()}
+        browser = run_browser(command, identity, timeout=120)
+        self.assertEqual(browser.returncode, 0, browser.stdout)
         print(browser.stdout, flush=True)
 
     def setUp(self):
@@ -89,9 +145,8 @@ class PipelineTests(unittest.TestCase):
             "containers": {service: self.command("ps", "-a", "-q", service).strip()
                            for service in ("backend", "db", "frontend", "db-storage")},
         }
-        browser = subprocess.run(["node", str(AUTH_COMPOSE.with_name("auth_browser.mjs"))],
-                                 input=json.dumps(identity), text=True, capture_output=True, timeout=300)
-        self.assertEqual(browser.returncode, 0, browser.stdout + browser.stderr)
+        browser = run_browser(["node", str(COMPOSE.with_name("auth_browser.mjs"))], identity, timeout=300)
+        self.assertEqual(browser.returncode, 0, browser.stdout)
         print(browser.stdout, flush=True)
 
     def seed_watchlists(self):

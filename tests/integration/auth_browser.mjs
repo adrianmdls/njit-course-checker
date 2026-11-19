@@ -1,14 +1,12 @@
 // Invoked serially by test_pipeline.py with the identity of its disposable stack.
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { readdirSync, readFileSync } from 'node:fs'
+import { basename, isAbsolute, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 
-const { project, origin, containers } = JSON.parse(readFileSync(0, 'utf8'))
+const { project, origin, containers, profile } = JSON.parse(readFileSync(0, 'utf8'))
 const services = ['backend', 'db', 'frontend', 'db-storage']
 assert.match(project, /^njit-banner-test-[a-f0-9]{10}$/)
 assert.match(origin, /^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/)
@@ -16,6 +14,8 @@ const port = new URL(origin).port
 assert.ok(port, 'The disposable frontend must use an explicit loopback port')
 assert.ok(services.every(service => /^[a-f0-9]{64}$/.test(containers?.[service])),
   'The pipeline must supply full container IDs')
+assert.ok(typeof profile === 'string' && isAbsolute(profile) && basename(profile).startsWith('njit-browser-test-')
+  && readdirSync(profile).length === 0, 'The pipeline must supply a new browser profile directory')
 const directory = fileURLToPath(new URL('.', import.meta.url)).replace(/\/$/, '')
 const files = ['compose.yaml', 'auth-compose.yaml'].map(name => join(directory, name))
 const compose = ['compose', '--env-file', '/dev/null', '-p', project, ...files.flatMap(file => ['-f', file])]
@@ -140,11 +140,11 @@ function devTools(chrome, errors) {
 
 inspectStack()
 await restartBackend()
-const profile = await mkdtemp(join(tmpdir(), 'njit-auth-browser-'))
 let chrome
 try {
   chrome = spawn(process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    ['--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+    ['--headless', '--disable-gpu', '--disable-breakpad', '--disable-crash-reporter',
+      '--no-first-run', '--no-default-browser-check',
       '--remote-debugging-pipe', `--user-data-dir=${profile}`, 'about:blank'],
     { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] })
   const errors = []
@@ -328,7 +328,6 @@ try {
         await exited
       }
     }
-    await rm(profile, { recursive: true, force: true })
   } finally {
     // Keep rate-limit counters isolated from the subsequent scenarios even
     // when an earlier assertion fails.
