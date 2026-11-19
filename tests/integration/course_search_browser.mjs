@@ -77,7 +77,24 @@ try {
     }
     window.button = text => [...document.querySelectorAll('button')].find(node=>node.textContent.trim()===text)
   ` })
-  await send('Page.navigate', { url: `${origin}/login` })
+  if (process.argv[3] !== 'empty') {
+    const username = `browser_${Date.now()}`
+    await send('Page.navigate', { url: `${origin}/register` })
+    await waitFor(`Boolean(document.getElementById('register-confirm'))`)
+    await evaluate(`setField('register-username',${JSON.stringify(username)}); setField('register-email',${JSON.stringify(`${username}@example.invalid`)}); setField('register-password','browser-only-test-password'); setField('register-confirm','browser-only-test-password')`)
+    await evaluate(`document.querySelector('button[type=submit]').click()`)
+    await waitFor(`location.pathname==='/login' && Boolean(document.getElementById('password'))`)
+    await evaluate(`setField('username',${JSON.stringify(username)}); setField('password','browser-only-test-password')`)
+    await evaluate(`document.querySelector('button[type=submit]').click()`)
+    await waitFor(`location.pathname==='/dashboard' && Boolean(button('Logout'))`)
+    await evaluate(`button('Logout').click()`)
+    await waitFor(`location.pathname==='/login' && Boolean(document.getElementById('password'))`)
+    await send('Page.navigate', { url: `${origin}/dashboard` })
+    await waitFor(`location.pathname==='/login' && Boolean(document.getElementById('password'))`)
+    console.log('PASS browser registration, login, logout, and protected-route session invalidation')
+  } else {
+    await send('Page.navigate', { url: `${origin}/login` })
+  }
   await waitFor(`Boolean(document.getElementById('password'))`)
   await evaluate(`setField('username','course_search_fixture'); setField('password','integration-only-search-password')`)
   await evaluate(`document.querySelector('button[type=submit]').click()`)
@@ -175,6 +192,29 @@ try {
   const watchRow = await evaluate(`[...document.querySelector('tbody tr').children].map(cell=>cell.textContent.trim())`)
   assert.deepEqual(watchRow.slice(0,4), ['12000','CS 100','202710','000'])
   assert.equal(watchRow[6], 'Open')
+  // Fixture-only activity changes exercise the real watchlist UI; transactional
+  // omission/reactivation is independently covered by the API lifecycle test.
+  const sectionId = unfiltered.sections[0].id
+  const setActivity = active => execFileSync('docker', ['exec', process.env.INTEGRATION_BACKEND_CONTAINER, 'node', '-e',
+    "const pool=require('./src/db'); pool.execute('UPDATE Sections SET is_active=? WHERE id=?',JSON.parse(process.argv[1])).finally(()=>pool.end())",
+    JSON.stringify([active, sectionId])], { timeout: 15000 })
+  try {
+    setActivity(false)
+    await send('Page.reload')
+    await waitFor(`document.querySelectorAll('tbody tr').length===1 && document.body.textContent.includes('Unavailable')`)
+    assert.ok(await evaluate(`document.body.textContent.includes('Last Seen')`))
+    assert.ok(await evaluate(`!document.querySelector('button[aria-label^="Remove CS 100"]').disabled`))
+    await evaluate(`button('Search Courses').click()`)
+    await waitFor(`Boolean(document.querySelector('#search-term option[value="202710"]'))`)
+    await evaluate(`setField('search-term','202710'); setField('search-department','CS')`)
+    await evaluate(`document.querySelector('button[type=submit]').click()`)
+    await waitFor(`document.body.textContent.includes('52 matching results')`)
+    assert.ok(await evaluate(`[...document.querySelectorAll('tbody tr')].every(row=>row.children[0].textContent.trim()!=='12000')`))
+  } finally {
+    setActivity(true)
+  }
+  await evaluate(`button('Watchlist').click()`)
+  await waitFor(`document.querySelectorAll('tbody tr').length===1 && document.querySelector('tbody tr').children[6].textContent.trim()==='Open'`)
   await send('Page.reload')
   await waitFor(`location.pathname==='/dashboard' && document.querySelectorAll('tbody tr').length===1 && !document.body.textContent.includes('Loading your watchlist')`)
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
@@ -197,7 +237,6 @@ try {
   await evaluate(`button('Retry watchlist').click()`)
   await waitFor(`document.querySelectorAll('tbody tr').length===1 && !document.body.textContent.includes('Loading your watchlist')`)
   const removeButton = `document.querySelector('button[aria-label^="Remove CS 100"]')`
-  const sectionId = unfiltered.sections[0].id
   await send('Network.setBlockedURLs', { urls: [`${origin}/api/watchlist/${sectionId}`] })
   await evaluate(`${removeButton}.click()`)
   await waitFor(`document.body.textContent.includes('Unable to update your watchlist')`)
@@ -215,7 +254,7 @@ try {
   await waitFor(`location.pathname==='/login' && Boolean(document.getElementById('password'))`)
   assert.deepEqual(errors, [])
   assert.ok(requests.every(url => url.searchParams.get('subject')), 'every search specifies a department')
-  console.log('PASS real React → Nginx → Express → MariaDB: catalog options/retry, mandatory departments, term switching, Spring search, parameters, rows, statuses/nulls, persistent Add/reload/Remove, watchlist retries, duplicate-click protection, pagination, empty results, session expiry')
+  console.log('PASS real React → Nginx → Express → MariaDB: catalog options/retry, mandatory departments, term switching, Spring search, parameters, rows, statuses/nulls, persistent Add/reload/Remove, inactive watch/search, watchlist retries, duplicate-click protection, pagination, empty results, session expiry')
   }
 } finally {
   ws?.close()

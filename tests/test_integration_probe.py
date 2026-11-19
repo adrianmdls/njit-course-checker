@@ -25,6 +25,17 @@ probe = load_probe_module("checker_probe_auth", "checker_probe.py")
 
 
 class ProbeAuthenticationTests(unittest.TestCase):
+    def test_spring_fixture_has_distinct_section_titles_and_a_stable_lowest_crn(self):
+        sections = probe.parse_all_sections(probe.banner("CS", section_count=53, mixed=True,
+                                                        title_variants=True, vary_enrollment=True))
+        self.assertEqual(len(sections), 53)
+        self.assertEqual(len({row["crn"] for row in sections}), 53)
+        self.assertEqual(len({row["title"] for row in sections}), 53)
+        self.assertEqual({row["course"] for row in sections}, {"CS 100"})
+        self.assertEqual({row["status"] for row in sections}, {"OPEN", "CLOSED", "CANCELLED"})
+        self.assertEqual({row["current_enrollment"] for row in sections}, {20, 21, 22})
+        self.assertEqual(min(sections, key=lambda row: row["crn"])["title"], "CS 100 - Introduction")
+
     def make_pipeline(self):
         case = pipeline.PipelineTests("test_configured_and_watched_targets_merge")
         case.sql = Mock()

@@ -93,7 +93,7 @@ column discards activity information and requires a separate reviewed operation.
 - Run the full backend, Python, lint/build and disposable pipeline/browser suites
   where their environment requirements are available.
 
-Verification on November 18, 2026: six socket-free backend tests passed; the new
+Initial verification on November 18, 2026: six socket-free backend tests passed; the new
 MariaDB case skipped. All ten frontend component tests and 65 Python tests passed;
 frontend lint/build, JavaScript syntax checks and `git diff --check` passed. The
 full backend run reported seven passes, 14 loopback `listen EPERM` failures, and
@@ -118,10 +118,10 @@ Existing empty and failure tests now cover mixed activity states and a rollback
 after attempted omission updates. A runtime schema assertion checks the fresh
 database column type, nullability, and default before running the reused tests.
 
-The suite now collects **17 integration cases**. Docker socket access remained
-denied in this environment, so these new Docker paths have not been executed
-here; the previously reported 15 local passes do not verify these additions.
-From the repository root, run:
+The suite now passes **all 17 integration cases** against disposable MariaDB,
+including migration from the previous schema with experimental columns and the
+full F2 lifecycle. Both real Chrome scenarios also passed. From the repository
+root, run:
 
 ```sh
 python -B -m pytest tests/integration/test_pipeline.py -v
@@ -130,9 +130,15 @@ python -B -m pytest tests/integration/test_pipeline.py -v
 This command owns its random Compose project/tmpfs database and runs the migration
 case automatically; do not supply an application database. Optional existing
 browser checks can be enabled with `RUN_BROWSER_TESTS=1` when Chrome is available.
-Local follow-up checks passed: 65 Python tests, 10 frontend tests, lint/build,
-syntax/collection, Compose config validation, and `git diff --check`. The backend
-run remained seven passes, 14 loopback `EPERM` failures, and four DB skips.
+Current follow-up checks passed: 72 Python unit tests (plus 61 subtests), all 30
+backend tests on a fresh disposable MariaDB server, 15 frontend tests, frontend
+lint/build, and `git diff --check`. Database suites ran serially to avoid sharing
+server-wide advisory lock names across test schemas. Chrome verified inactive
+watchlist rendering and search exclusion; API tests verified real reconciliation,
+reactivation, transition counts, and transactional rollback. The existing production
+authentication smoke script also passed inside the disposable integration stack.
+No application database, persistent volume, scheduler state, or existing
+application container was changed, and no live Banner request was made.
 
 ## Remaining completeness risk
 

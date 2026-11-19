@@ -29,7 +29,7 @@ from src.njit_scraper import parse_all_sections
 FIXTURES = json.loads((Path(__file__).resolve().parents[1] / "fixtures/banner-snapshots.json").read_text())
 
 
-def banner(subject, status="OPEN", enrolled=20, section_count=None, mixed=False):
+def banner(subject, status="OPEN", enrolled=20, section_count=None, mixed=False, title_variants=False, vary_enrollment=False):
     courses = [("100", "12345", "001"), ("100", "12346", "H01")] if subject == "CS" else [
         ("101", "54321", "001"), ("490", "54322", "H01")]
     if section_count and subject == "CS":
@@ -38,7 +38,10 @@ def banner(subject, status="OPEN", enrolled=20, section_count=None, mixed=False)
     for index, (number, crn, section) in enumerate(courses):
         stored_status = ["OPEN", "CLOSED", "CANCELLED"][index % 3] if mixed else status
         title = "Special Topics - AI" if number == "490" else f"{subject} {number} - Introduction"
-        cells = [section, crn, "M", "10:00", "CKB", stored_status, "30", str(enrolled),
+        if title_variants and subject == "CS" and index:
+            title = f"{subject} {number} - Topic for section {section}"
+        current_enrollment = enrolled + index % 3 if vary_enrollment else enrolled
+        cells = [section, crn, "M", "10:00", "CKB", stored_status, "30", str(current_enrollment),
                  "Instructor", "In Person", "3", "", ""]
         tables.append(f'<h4 id="{subject} {number}">{title}</h4><table class="sections-table"><tr>'
                       + "".join(f"<td>{value}</td>" for value in cells) + "</tr></table>")
@@ -91,7 +94,8 @@ def run(options):
         if mode == "submit":
             data = (FIXTURES[options["banner_fixture"]] if "banner_fixture" in options else
                     banner(options["subject"], options.get("status", "OPEN"), options.get("enrolled", 20),
-                           options.get("section_count"), options.get("mixed", False)))
+                           options.get("section_count"), options.get("mixed", False), options.get("title_variants", False),
+                           options.get("vary_enrollment", False)))
             sections = parse_all_sections(data)
             return submit_department_snapshot(options["subject"], options["term"], sections)
         calls = []
@@ -103,7 +107,8 @@ def run(options):
             if "banner_fixture" in options:
                 return FIXTURES[options["banner_fixture"]]
             return banner(subject, options.get("status", "OPEN"), options.get("enrolled", 20),
-                          options.get("section_count"), options.get("mixed", False))
+                          options.get("section_count"), options.get("mixed", False), options.get("title_variants", False),
+                          options.get("vary_enrollment", False))
 
         with patch.object(checker, "get_sections", side_effect=fetch):
             if mode == "manual":

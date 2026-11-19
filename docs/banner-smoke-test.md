@@ -24,16 +24,18 @@ block Python database imports and check that the database IP is unreachable.
 SQL setup and observations run through the disposable backend container.
 Built test images remain cached for reruns and the focused commands below.
 
-Ten integration tests cover configured and watched targets, deduplication,
+Seventeen integration tests cover configured and watched targets, deduplication,
 full snapshot polling, actual client GET/POST authentication, stable IDs and
 Watchlists, repeat requests, real status transitions, late transaction failure,
 failed Banner fetches, manual read-only behavior, and application Compose wiring.
+The existing production-authentication smoke script also runs inside the test
+backend, checking HTTPS requirements and secure cookie flags in a child process.
 Failure tests compare all course, section, Watchlist, and synchronization rows;
 timestamps are deliberately aged so accidental freshness updates cannot hide
 within the same second. Fixtures include Winter terms, alphanumeric section
 labels, and titles containing ` - `.
 
-Course-search coverage adds real cookie login, unauthenticated `401`, subject,
+Course-search coverage adds real cookie login, unauthenticated `401`, mandatory subject,
 number-prefix/full-code and stored status filters, sorting, pagination totals,
 repeat synchronization, updated enrollment/status, and empty unsynchronized
 department/term results. Full-row snapshots prove searches leave course,
@@ -53,11 +55,16 @@ Watchlist changes in the browser test are removed before its final snapshot
 comparison; existing fixture users' watches remain untouched.
 One synchronized row is explicitly changed to NULL capacity/enrollment to test
 legacy nullable values, which the normalized ingestion contract cannot supply.
-Browser checks also capture an unfiltered Spring 2027 request, HTTP status and
+Browser checks also capture a Spring 2027 department search, HTTP status and
 pagination metadata, exercise metadata network failure/retry and expiry, and
-verify term-dependent departments and submitted pagination filters.
+verify required department selection, term-dependent departments and submitted
+pagination filters. They register a fresh account, log in and out through React,
+and check the protected route after logout. A fixture-only activity toggle on the
+disposable database verifies Unavailable/last-seen watchlist rendering and search
+exclusion, then restores activity. Transactional activity changes are covered by
+the separate API lifecycle and migration tests.
 The empty-catalog browser case verifies the explanatory message and disabled search.
-Without the flag, only browser verification is omitted; the ten pipeline tests
+Without the flag, only browser verification is omitted; all 17 pipeline tests
 still run. Browser failures fail the suite when requested. Cleanup removes its
 temporary Chrome profile as well as the Compose stack, including on test failure.
 
@@ -93,7 +100,9 @@ printf '%s' '{"mode":"submit","subject":"CS","term":"202710","section_count":53,
 Open `http://127.0.0.1:8089`, register a test account and log in. In Search Courses,
 select Spring 2027, department CS and `CS 100` (or prefix `1`). Expect 53 matches,
 50 on page 1 and three on page 2. Test each status, sort/order, Previous/Next and
-Add. Only locally available terms/departments appear. A nonexistent course
+Add. Only locally available terms/departments appear. Search stays disabled until
+a department is selected. Changing terms clears an unavailable selection; changing
+either term or department clears old results. A nonexistent course
 prefix such as `99999` returns an empty list; direct authenticated API requests
 for PHIL or Fall 2026 also return empty results for this fixture. Searches and
 catalog options never trigger Banner or synchronization. In browser developer tools, confirm requests use

@@ -151,10 +151,16 @@ class PipelineTests(unittest.TestCase):
 
     def test_synchronized_course_search_through_proxy(self):
         self.seed_watchlists()
-        synced = self.probe("poll", section_count=53, mixed=True)
+        synced = self.probe("poll", section_count=53, mixed=True, title_variants=True, vary_enrollment=True)
         self.assertEqual(synced["errors"], 0, synced)
         self.assertEqual(synced["banner_calls"], [["CS", "202710"], ["IT", "202795"]])
         before = self.snapshot()
+        self.assertEqual(self.sql("SELECT title FROM Courses WHERE subject=? AND course_number=?", ["CS", "100"]),
+                         [{"title": "Introduction"}], "lowest-CRN title survives the other 52 topic titles")
+        observed = [row for row in before["Sections"] if row["subject"] == "CS" and row["term"] == "202710"
+                    and row["is_active"] == 1]
+        self.assertEqual(len(observed), 53)
+        self.assertTrue(all(row["course_id"] is not None for row in observed))
         query = {"term": "202710", "subject": "CS"}
         self.assertEqual(self.probe("search", authenticated=False, queries=[query])[0]["status"], 401)
         rejected = self.probe("search", queries=[{"term": "202710"},
@@ -166,23 +172,39 @@ class PipelineTests(unittest.TestCase):
                    {**query, "sort": "crn", "order": "desc", "limit": 2, "offset": 1},
                    {**query, "sort": "availability", "order": "asc", "limit": 2},
                    {"term": "202795", "subject": "IT"},
-                   {"term": "202710", "subject": "ECE"}, {"term": "202790", "subject": "CS"}]
+                   {"term": "202710", "subject": "ECE"}, {"term": "202790", "subject": "CS"},
+                   {**query, "offset": 50}, {**query, "offset": 53},
+                   *[{**query, "sort": sort, "order": order, "limit": 100}
+                     for sort in ("course", "crn", "availability") for order in ("asc", "desc")]]
         responses = self.probe("search", queries=queries)
         self.assertTrue(all(row["status"] == 200 for row in responses), responses)
         bodies = [row["body"] for row in responses]
         for body in bodies[:3]:
             self.assertEqual(body["pagination"], {"limit": 50, "offset": 0, "total": 53})
             self.assertEqual(len(body["sections"]), 50)
-            self.assertTrue(all(row["subject"] == "CS" and row["course"] == "CS 100" for row in body["sections"]))
+            self.assertTrue(all(row["subject"] == "CS" and row["course"] == "CS 100"
+                                and row["title"] == "Introduction" and row["is_active"] is True
+                                for row in body["sections"]))
         for body, status, total in zip(bodies[3:6], ("OPEN", "CLOSED", "CANCELLED"), (18, 18, 17)):
             self.assertEqual(body["pagination"]["total"], total)
             self.assertTrue(all(row["status"] == status for row in body["sections"]))
         self.assertEqual([row["crn"] for row in bodies[6]["sections"]], ["12051", "12050"])
         self.assertEqual(bodies[6]["pagination"], {"limit": 2, "offset": 1, "total": 53})
-        self.assertEqual([row["crn"] for row in bodies[7]["sections"]], ["12000", "12001"])
+        self.assertEqual([row["crn"] for row in bodies[7]["sections"]], ["12002", "12005"])
         self.assertEqual(bodies[8]["pagination"]["total"], 2)
-        for body in bodies[9:]:
+        for body in bodies[9:11]:
             self.assertEqual(body, {"sections": [], "pagination": {"limit": 50, "offset": 0, "total": 0}})
+        self.assertEqual(bodies[11]["pagination"], {"limit": 50, "offset": 50, "total": 53})
+        self.assertEqual([row["crn"] for row in bodies[11]["sections"]], ["12050", "12051", "12052"])
+        self.assertEqual(bodies[12], {"sections": [], "pagination": {"limit": 50, "offset": 53, "total": 53}})
+        for index, body in enumerate(bodies[13:]):
+            expected = [str(crn) for crn in range(12000, 12053)]
+            if index // 2 == 2:  # availability: capacity 30, enrollment 20/21/22
+                expected = [str(12000 + i) for i in sorted(range(53), key=lambda i: (10 - i % 3, i))]
+            if index % 2:
+                expected.reverse()
+            self.assertEqual(body["pagination"], {"limit": 100, "offset": 0, "total": 53})
+            self.assertEqual([row["crn"] for row in body["sections"]], expected)
         # Search cannot fetch public Banner: both API networks are internal.
         # Full-row snapshots detect writes, including synchronization timestamps.
         self.assertEqual(self.snapshot(), before)
@@ -195,14 +217,14 @@ class PipelineTests(unittest.TestCase):
             # The browser deliberately expires every test session. Renew the
             # probe's real cookie through login, reusing its existing account.
             self.session_cookies = self.probe("authenticate", register=False)["cookies"]
-        changed = self.probe("poll", section_count=53, status="CLOSED", enrolled=29)
+        changed = self.probe("poll", section_count=53, status="CLOSED", enrolled=29, title_variants=True)
         self.assertEqual(changed["errors"], 0, changed)
         after = self.probe("search", queries=[query])[0]["body"]
         self.assertTrue(all(row["status"] == "CLOSED" and row["now"] == 29 for row in after["sections"]))
         self.assertEqual(after["pagination"]["total"], 53)
         self.assertEqual(self.sql("SELECT id,crn FROM Sections ORDER BY id"),
                          [{"id": row["id"], "crn": row["crn"]} for row in before["Sections"]])
-        self.assertEqual(self.probe("poll", section_count=53, status="CLOSED", enrolled=29)["errors"], 0)
+        self.assertEqual(self.probe("poll", section_count=53, status="CLOSED", enrolled=29, title_variants=True)["errors"], 0)
         self.assertEqual(len(self.snapshot()["Sections"]), len(before["Sections"]))
 
     def test_local_catalog_options_follow_searchable_pairs_without_writes(self):
@@ -215,11 +237,21 @@ class PipelineTests(unittest.TestCase):
         self.sql("INSERT INTO Sections(subject,term,crn) VALUES ('MATH','202790','99999')")
         self.assertEqual(self.probe("submit", subject="ECE", term="202695")["sections"], 2)
         self.assertEqual(self.probe("submit", subject="CS", term="202710")["sections"], 2)
+        self.assertEqual(self.probe("submit", subject="IT", term="202710")["sections"], 2)
         before = self.snapshot()
         self.assertEqual(self.probe("options"), {"status": 200, "body": {"terms": [
-            {"code": "202710", "departments": ["CS"]},
+            {"code": "202710", "departments": ["CS", "IT"]},
             {"code": "202695", "departments": ["ECE"]},
         ]}})
+        self.assertEqual(self.snapshot(), before)
+        queries = [{"term": "202710", "subject": "CS"}, {"term": "202710", "subject": "IT"},
+                   {"term": "202695", "subject": "ECE"}, {"term": "202710", "subject": "ECE"}]
+        filtered = self.probe("search", queries=queries)
+        for response, filters, expected in zip(filtered, queries, (2, 2, 2, 0)):
+            self.assertEqual(response["status"], 200)
+            self.assertEqual(response["body"]["pagination"]["total"], expected)
+            self.assertTrue(all(row["term"] == filters["term"] and row["subject"] == filters["subject"]
+                                for row in response["body"]["sections"]))
         self.assertEqual(self.snapshot(), before)
 
     def test_banner_failure_preserves_all_records_and_sync_times(self):
@@ -268,7 +300,7 @@ class PipelineTests(unittest.TestCase):
     def test_section_activity_lifecycle_through_python_api_search_and_watchlist(self):
         # CS fixtures use stable CRNs 12000/12001 for section_count=2. Mixed
         # status makes the returning section CLOSED while the survivor stays OPEN.
-        self.assertEqual(self.probe("submit", subject="CS", term="202710", section_count=2, mixed=True),
+        self.assertEqual(self.probe("submit", subject="CS", term="202710", section_count=2, mixed=True, title_variants=True),
                          {"courses": 1, "sections": 2, "status_changes": 0})
         query = {"term": "202710", "subject": "CS"}
 
@@ -307,7 +339,7 @@ class PipelineTests(unittest.TestCase):
         self.assertIn({"subject": "CS", "term": "202710"}, self.probe("targets")["targets"],
                       "an inactive-only watch must remain monitored")
 
-        self.assertEqual(self.probe("submit", subject="CS", term="202710", section_count=2),
+        self.assertEqual(self.probe("submit", subject="CS", term="202710", section_count=2, title_variants=True),
                          {"courses": 1, "sections": 2, "status_changes": 0},
                          "CLOSED to OPEN on reappearance establishes a baseline")
         restored = search()
@@ -424,6 +456,11 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn("db", checker["depends_on"])
         self.assertEqual(json.loads(services["backend"]["environment"]["CHECKER_MONITORING_TARGETS"]),
                          [{"subject": "IT", "term": "202795"}])
+        # Run the existing HTTPS/cookie smoke test against this test-owned DB.
+        # Its production environment changes apply only to the child process.
+        output = self.command("exec", "-T", "backend", "node",
+                              input=(ROOT / "backend/test/production.cjs").read_text())
+        self.assertIn("PASS:", output)
 
 
 if __name__ == "__main__":

@@ -196,10 +196,10 @@ Run `cd backend && npm test` for authentication and validation tests. Database t
 
 ```sh
 cd backend
-TEST_DB_PORT=<disposable-database-port> npm test
+TEST_DB_PORT=<disposable-database-port> node --test --test-concurrency=1 test/*.test.cjs
 ```
 
-Use a fresh database for each run; the suite creates schema, users, Watchlists, and a failure-injection trigger. Never point these tests at an application database. The full suite checks real MariaDB upserts, section ID preservation, watched/unwatched updates, status changes, rollback of existing and new records, completion timestamp rollback, retries, caller-controlled snapshot ordering, Winter terms, subject collisions, and lock contention. It uses Node's test runner and existing dependencies.
+Run the database suites serially on a shared disposable server: synchronization advisory locks are server-wide even when tests use separate schemas. Use a fresh database for each run; the suite creates schema, users, Watchlists, and a failure-injection trigger. Never point these tests at an application database. The full suite checks real MariaDB upserts, section ID preservation, watched/unwatched updates, status changes, rollback of existing and new records, completion timestamp rollback, retries, caller-controlled snapshot ordering, Winter terms, subject collisions, and lock contention. It uses Node's test runner and existing dependencies.
 
 Course search tests additionally cover session authentication, invalid parameters
 and injection attempts, normalized prefixes and full course codes, filters,
