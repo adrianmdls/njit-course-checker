@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from src.njit_scraper import BannerValidationError, get_sections, parse_all_sections, parse_section
+from src.njit_scraper import BannerValidationError, get_sections, parse_all_sections
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = json.loads((ROOT / 'tests/fixtures/banner-snapshots.json').read_text())
@@ -18,10 +18,10 @@ class ParserTests(unittest.TestCase):
         sections = parse_all_sections(FIXTURES['valid'])
         self.assertEqual(len(sections), 1)
         self.assertEqual(sections[0]['crn'], '01234')
+        self.assertEqual(sections[0]['max_enrollment'], 30)
+        self.assertEqual(sections[0]['current_enrollment'], 31)
         self.assertEqual(sections[0]['seats_remaining'], -1)
         self.assertEqual(sections[0]['section'], 'H01')
-        self.assertEqual(parse_section(FIXTURES['valid'], '01234'),
-                         {k: v for k, v in sections[0].items() if k not in ('course', 'title')})
 
     def test_explicit_empty_list(self):
         self.assertEqual(parse_all_sections(FIXTURES['empty']), [])

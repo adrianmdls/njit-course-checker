@@ -47,8 +47,9 @@ paired section tables and complete 13-cell data rows. Complete 13-cell `th`
 header rows are allowed. Course whitespace is normalized; status is uppercased.
 Unsupported rows, extra/unmatched tables or rows, missing tables, truncated tags,
 HTML documents, forms and scripts fail the entire response. No records are
-submitted from a partially parsed response. Individual CRN lookups use the same
-strict parser.
+submitted from a partially parsed response. Phase 1 also used this parser for
+individual CRN lookups via a wrapper that was later removed during repository
+cleanup.
 
 The empty contract is proven by offline fixtures, **not a live observation of
 Banner during this phase**. Nonempty envelopes containing empty HTML, header-only
