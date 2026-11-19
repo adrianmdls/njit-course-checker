@@ -244,7 +244,7 @@ test('MariaDB watchlists persist across app restarts, isolate users and promote/
       assert.deepEqual(await list(bob), []);
       assert.deepEqual(await api.targets(), { targets: [] });
       assert.deepEqual((await pool.query('SELECT * FROM Sections ORDER BY id'))[0], sectionsBefore);
-      const search = await api.request('GET', '/api/courses?term=202710', undefined, alice);
+      const search = await api.request('GET', '/api/courses?term=202710&subject=CS', undefined, alice);
       assert.equal(search.status, 200);
       assert.equal((await search.json()).pagination.total, 2);
       assert.deepEqual((await pool.query('SELECT * FROM DepartmentSyncs'))[0], []);

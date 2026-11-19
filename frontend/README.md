@@ -9,6 +9,12 @@ stored section, including Closed/Cancelled/unknown states. Notification controls
 are not implemented. See the [root guide](../README.md) for
 Compose setup and [backend guide](../backend/README.md) for the API contract.
 
+Search requires a term and an explicitly selected department. Options come from
+`/api/courses/options`, which includes only departments with active, linked
+sections for that term. Changing terms preserves the department only when it is
+available in the new term. Term and department changes clear results and cancel
+outdated requests while preserving the other filters.
+
 ## Development
 
 Use Node.js 24 or newer, matching the frontend Docker build. After configuring
@@ -34,6 +40,7 @@ UI on port 8080, recreate the backend with the root `.env` origin again:
 From `frontend/`:
 
 ```sh
+npm test
 npm run lint
 npm run build
 ```

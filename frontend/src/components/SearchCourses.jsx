@@ -26,7 +26,9 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const activeRequest = useRef(null)
-  const departments = options?.terms.find(entry => entry.code === term)?.departments ?? []
+  const selectedTerm = options?.terms.find(entry => entry.code === term)
+  const departments = selectedTerm?.departments ?? []
+  const canSearch = Boolean(selectedTerm) && departments.includes(department)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -90,11 +92,20 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
     }
   }
 
+  function clearSearch() {
+    activeRequest.current?.abort()
+    activeRequest.current = null
+    setResults(null)
+    setSubmittedFilters(null)
+    setPagination({ limit: 50, offset: 0, total: 0 })
+    setLoading(false)
+    setError('')
+  }
+
   function handleSearch(event) {
     event.preventDefault()
-    if (!options || !term) return
-    const filters = { term, sort, order }
-    if (department) filters.subject = department
+    if (!canSearch) return
+    const filters = { term, subject: department, sort, order }
     if (courseNumber.trim()) filters.query = courseNumber.trim().replace(/\s+/g, ' ').toUpperCase()
     if (status) filters.status = status
     setSubmittedFilters(filters)
@@ -118,14 +129,10 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
             onChange={(event) => {
               const code = event.target.value
               if (code === term) return
-              activeRequest.current?.abort()
-              activeRequest.current = null
+              clearSearch()
               setTerm(code)
-              setResults(null)
-              setSubmittedFilters(null)
-              setPagination({ limit: 50, offset: 0, total: 0 })
-              setLoading(false)
-              setError('')
+              const available = options?.terms.find(entry => entry.code === code)?.departments ?? []
+              if (!available.includes(department)) setDepartment('')
             }}
             className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
           >
@@ -141,12 +148,16 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
           <select
             id="search-department"
             value={department}
-            disabled={!term}
-            onChange={(event) => setDepartment(event.target.value)}
+            disabled={!selectedTerm || !departments.length}
+            onChange={(event) => {
+              const subject = event.target.value
+              if (subject === department) return
+              clearSearch()
+              setDepartment(subject)
+            }}
             className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
           >
-            <option value="">All Departments</option>
-            {department && !departments.includes(department) && <option value={department}>{department}</option>}
+            <option value="" disabled>Select department</option>
             {departments.map((subject) => (
               <option key={subject} value={subject}>
                 {subject}
@@ -214,7 +225,7 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
 
         <button
           type="submit"
-          disabled={loading || !options || !term}
+          disabled={loading || !canSearch}
           className="flex cursor-pointer items-center justify-center gap-2 rounded-md bg-[#D60000] px-6 py-3 font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60 md:col-span-3"
         >
           <Search size={20} />

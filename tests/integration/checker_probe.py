@@ -68,8 +68,9 @@ def run(options):
                                "X-Requested-With": "NJIT-Course-Checker"}
                     credentials = {"username": "course_search_fixture", "email": "search@example.invalid",
                                    "password": "integration-only-search-password"}
-                    response = session.post("http://frontend/api/auth/register", json=credentials, headers=headers, timeout=10)
-                    assert response.status_code in (201, 409), response.text
+                    if options.get("register", True):
+                        response = session.post("http://frontend/api/auth/register", json=credentials, headers=headers, timeout=10)
+                        assert response.status_code in (201, 409), response.text
                     response = session.post("http://frontend/api/auth/login", json={
                         "identifier": credentials["username"], "password": credentials["password"]}, headers=headers, timeout=10)
                     response.raise_for_status()

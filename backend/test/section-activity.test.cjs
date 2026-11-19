@@ -174,7 +174,7 @@ test('search filters activity in count/page/options; watchlist and targets keep 
       checked_epoch: 1794916800 }]];
   } };
   const courses = createCourses(pool, auth);
-  const page = await invoke(courses, 'get', '/', { query: { term: '202710' } });
+  const page = await invoke(courses, 'get', '/', { query: { term: '202710', subject: 'CS' } });
   assert.equal(page.body.sections[0].is_active, true);
   assert.ok(calls.slice(0, 2).every(call => /s.is_active = TRUE/.test(call.sql)));
   await invoke(courses, 'get', '/options');

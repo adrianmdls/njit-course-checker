@@ -50,7 +50,7 @@ async function serve(pool) {
   const base = `http://127.0.0.1:${server.address().port}`;
   return {
     options: (cookie = validCookie, query = '') => fetch(`${base}/api/courses/options${query}`, { headers: { Cookie: cookie } }),
-    get: (query = 'term=202710', cookie = validCookie, headers = {}) => fetch(`${base}/api/courses?${query}`, {
+    get: (query = 'term=202710&subject=CS', cookie = validCookie, headers = {}) => fetch(`${base}/api/courses?${query}`, {
       headers: { Cookie: cookie, ...headers },
     }),
     post: (path, body, cookie = '') => fetch(`${base}/api/auth/${path}`, {
@@ -68,7 +68,7 @@ test('course search requires a valid session and existing user, not a checker to
   const api = await serve(fakePool(() => { throw new Error('Search must not run'); }));
   try {
     for (const cookie of ['', 'njit.sid=invalid', signedCookie('missing'), signedCookie('expired-session'), signedCookie('deleted-user')]) {
-      const response = await api.get('term=202710', cookie, { Authorization: 'Bearer test-checker-token' });
+      const response = await api.get('term=202710&subject=CS', cookie, { Authorization: 'Bearer test-checker-token' });
       assert.equal(response.status, 401, cookie);
       assert.equal(response.headers.get('cache-control'), 'no-store');
       assert.equal((await api.options(cookie)).status, 401);
@@ -79,8 +79,9 @@ test('course search requires a valid session and existing user, not a checker to
 test('course search validates all parameters and duplicates before querying courses', async () => {
   const api = await serve(fakePool(() => { throw new Error('Search must not run'); }));
   try {
-    const invalid = ['', 'term=', 'term=202711', 'term=20271', 'term=2027100', 'term=2027a0',
-      'term=202710&term=202795', 'term[]=202710', 'term[x]=202710',
+    const invalid = ['term=202710', 'term=202710&query=CS%20280',
+      ...['', 'term=', 'term=202711', 'term=20271', 'term=2027100', 'term=2027a0',
+        'term=202710&term=202795', 'term[]=202710', 'term[x]=202710'].map(query => `${query}&subject=CS`),
       ...['subject=', 'subject=cs', 'subject=1CS', 'subject=ABCDEFGHIJK', 'subject=CS%27',
         'query=', 'query=CS', 'query=CS280', 'query=280%25', 'query=280_',
         'query=280%27%20OR%201=1', 'query=CS%20280&subject=IT',
@@ -90,7 +91,7 @@ test('course search validates all parameters and duplicates before querying cour
         'limit=1e2', 'limit=', 'offset=-1', 'offset=1.5', 'offset=2147483648',
         'offset=99999999999999999999999', 'offset=', 'unknown=1',
         ...['subject', 'query', 'status', 'sort', 'order', 'limit', 'offset'].map(key => `${key}=1&${key}=2`),
-      ].map(query => `term=202710&${query}`)];
+      ].map(query => `term=202710&${query.includes('subject=') ? '' : 'subject=CS&'}${query}`)];
     for (const query of invalid) assert.equal((await api.get(query)).status, 400, query);
   } finally { await api.close(); }
 });
@@ -103,7 +104,7 @@ test('valid filters are parameterized, terms include Winter, and empty results i
   }));
   try {
     for (const suffix of ['10', '50', '90', '95']) {
-      const response = await api.get(`term=2027${suffix}`);
+      const response = await api.get(`term=2027${suffix}&subject=CS`);
       assert.equal(response.status, 200);
       assert.deepEqual(await response.json(), { sections: [], pagination: { limit: 50, offset: 0, total: 0 } });
     }
@@ -188,7 +189,7 @@ test('MariaDB course search with real login, filters, all sort directions, pagin
       // Legacy unlinked sections must be excluded by the INNER JOIN.
       await pool.execute("INSERT INTO Sections (subject,term,crn) VALUES ('CS','202710','09999')");
       api = await serve(pool);
-      assert.equal((await api.get('term=202710', '')).status, 401);
+      assert.equal((await api.get('term=202710&subject=CS', '')).status, 401);
       const credentials = { username: 'searcher', email: 'searcher@example.invalid', password: 'test password with enough characters' };
       assert.equal((await api.post('register', credentials)).status, 201);
       const login = await api.post('login', { identifier: credentials.username, password: credentials.password });
@@ -200,35 +201,37 @@ test('MariaDB course search with real login, filters, all sort directions, pagin
       ] });
       assert.deepEqual((await pool.query('SELECT * FROM Sections ORDER BY id'))[0], beforeOptions);
       const search = async (query = '') => {
-        const response = await api.get(`term=202710${query}`, cookie);
+        const params = new URLSearchParams({ term: '202710', subject: 'CS' });
+        for (const [key, value] of new URLSearchParams(query.replace(/^&/, ''))) params.set(key, value);
+        const response = await api.get(params.toString(), cookie);
         assert.equal(response.status, 200, query);
         return response.json();
       };
-      assert.deepEqual((await search()).sections.map(row => row.id), [5, 6, 7, 8, 2, 1, 3, 4]);
-      assert.equal((await search()).pagination.total, 8);
-      assert.equal((await search('&subject=CS')).pagination.total, 7);
-      assert.equal((await search('&query=280')).pagination.total, 4);
+      assert.deepEqual((await search()).sections.map(row => row.id), [5, 6, 7, 8, 2, 1, 3]);
+      assert.equal((await search()).pagination.total, 7);
+      assert.deepEqual((await search('&subject=IT')).sections.map(row => row.id), [4]);
+      assert.equal((await search('&query=280')).pagination.total, 3);
       assert.deepEqual((await search('&query=%20cs%20%20%20280%20')).sections.map(row => row.id), [2, 1, 3]);
       assert.equal((await api.get('term=202710&subject=IT&query=CS%20280', cookie)).status, 400);
-      for (const [status, count] of [['OPEN', 4], ['CLOSED', 2], ['CANCELLED', 1]]) {
+      for (const [status, count] of [['OPEN', 3], ['CLOSED', 2], ['CANCELLED', 1]]) {
         const result = await search(`&status=${status}`);
         assert.equal(result.pagination.total, count);
         assert.ok(result.sections.every(row => row.status === status));
       }
       const sorts = {
-        course: [5, 6, 7, 8, 2, 1, 3, 4], crn: [2, 1, 3, 4, 5, 6, 7, 8],
-        availability: [3, 2, 7, 1, 4, 5, 6, 8],
+        course: [5, 6, 7, 8, 2, 1, 3], crn: [2, 1, 3, 5, 6, 7, 8],
+        availability: [3, 2, 7, 1, 5, 6, 8],
       };
       for (const [sort, ascending] of Object.entries(sorts)) {
         for (const order of ['asc', 'desc']) {
           const expected = order === 'asc' ? ascending : sort === 'availability'
-            ? [4, 1, 7, 2, 3, 8, 6, 5] : [...ascending].reverse();
+            ? [1, 7, 2, 3, 8, 6, 5] : [...ascending].reverse();
           const result = await search(`&sort=${sort}&order=${order}`);
           assert.deepEqual(result.sections.map(row => row.id), expected, `${sort} ${order}`);
           const paged = [];
-          for (let offset = 0; offset < 8; offset += 3) {
+          for (let offset = 0; offset < 7; offset += 3) {
             const page = await search(`&sort=${sort}&order=${order}&limit=3&offset=${offset}`);
-            assert.deepEqual(page.pagination, { limit: 3, offset, total: 8 });
+            assert.deepEqual(page.pagination, { limit: 3, offset, total: 7 });
             paged.push(...page.sections.map(row => row.id));
           }
           assert.deepEqual(paged, expected);
@@ -245,9 +248,9 @@ test('MariaDB course search with real login, filters, all sort directions, pagin
       assert.equal((await search()).sections.find(row => row.id === 8).max, null);
       assert.equal((await search()).sections.find(row => row.id === 8).now, null);
       assert.deepEqual(await search('&subject=ECE'), { sections: [], pagination: { limit: 50, offset: 0, total: 0 } });
-      assert.deepEqual(await search('&offset=100'), { sections: [], pagination: { limit: 50, offset: 100, total: 8 } });
+      assert.deepEqual(await search('&offset=100'), { sections: [], pagination: { limit: 50, offset: 100, total: 7 } });
       for (const term of ['202750', '202790', '202795']) {
-        const response = await api.get(`term=${term}`, cookie);
+        const response = await api.get(`term=${term}&subject=CS`, cookie);
         assert.equal(response.status, 200);
         const body = await response.json();
         assert.equal(body.pagination.total, term === '202795' ? 1 : 0);
@@ -255,12 +258,12 @@ test('MariaDB course search with real login, filters, all sort directions, pagin
       }
       // An actual SQL failure must reach the same sanitized database response.
       await pool.query('RENAME TABLE Sections TO UnavailableSections');
-      const unavailable = await api.get('term=202710', cookie);
+      const unavailable = await api.get('term=202710&subject=CS', cookie);
       assert.equal(unavailable.status, 503);
       assert.deepEqual(await unavailable.json(), { error: 'Service temporarily unavailable' });
       assert.equal((await api.options(cookie)).status, 503);
       assert.equal((await api.post('logout', {}, cookie)).status, 204);
-      assert.equal((await api.get('term=202710', cookie)).status, 401);
+      assert.equal((await api.get('term=202710&subject=CS', cookie)).status, 401);
     } finally {
       if (api) await api.close();
       await pool.end();

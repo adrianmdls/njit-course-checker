@@ -4,9 +4,10 @@ function validate(params) {
   const allowed = ['term', 'subject', 'query', 'status', 'sort', 'order', 'limit', 'offset'];
   if (Object.entries(params).some(([key, value]) => !allowed.includes(key) || typeof value !== 'string')) return null;
   const { term, status, sort = 'course', order = 'asc', limit = '50', offset = '0' } = params;
-  let { subject, query } = params;
+  const { subject } = params;
+  let { query } = params;
   if (typeof term !== 'string' || !/^\d{4}(10|50|90|95)$/.test(term) ||
-      (subject !== undefined && !/^[A-Z][A-Z0-9]{0,9}$/.test(subject)) ||
+      (typeof subject !== 'string' || !/^[A-Z][A-Z0-9]{0,9}$/.test(subject)) ||
       (status !== undefined && !['OPEN', 'CLOSED', 'CANCELLED'].includes(status)) ||
       !['course', 'crn', 'availability'].includes(sort) || !['asc', 'desc'].includes(order) ||
       !/^\d{1,3}$/.test(limit) || Number(limit) < 1 || Number(limit) > 100 ||
@@ -16,8 +17,7 @@ function validate(params) {
     if (query.length > 100) return null;
     query = query.trim().replace(/\s+/g, ' ').toUpperCase();
     const match = /^(?:([A-Z][A-Z0-9]{0,9}) )?(\d[A-Z0-9]{0,19})$/.exec(query);
-    if (!match || (subject && match[1] && subject !== match[1])) return null;
-    subject = subject || match[1];
+    if (!match || (match[1] && subject !== match[1])) return null;
     prefix = match[2];
   }
   return { term, subject, prefix, status, sort, order, limit: Number(limit), offset: Number(offset) };

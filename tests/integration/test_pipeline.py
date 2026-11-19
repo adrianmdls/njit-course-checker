@@ -157,6 +157,10 @@ class PipelineTests(unittest.TestCase):
         before = self.snapshot()
         query = {"term": "202710", "subject": "CS"}
         self.assertEqual(self.probe("search", authenticated=False, queries=[query])[0]["status"], 401)
+        rejected = self.probe("search", queries=[{"term": "202710"},
+                                                {"term": "202710", "query": "CS 100"},
+                                                {"term": "202710", "subject": ""}])
+        self.assertTrue(all(row["status"] == 400 for row in rejected), rejected)
         queries = [query, {**query, "query": "100"}, {**query, "query": " cs  100 "},
                    *[{**query, "status": status} for status in ("OPEN", "CLOSED", "CANCELLED")],
                    {**query, "sort": "crn", "order": "desc", "limit": 2, "offset": 1},
@@ -188,6 +192,9 @@ class PipelineTests(unittest.TestCase):
             browser_before = self.snapshot()
             self.verify_browser()
             self.assertEqual(self.snapshot(), browser_before)
+            # The browser deliberately expires every test session. Renew the
+            # probe's real cookie through login, reusing its existing account.
+            self.session_cookies = self.probe("authenticate", register=False)["cookies"]
         changed = self.probe("poll", section_count=53, status="CLOSED", enrolled=29)
         self.assertEqual(changed["errors"], 0, changed)
         after = self.probe("search", queries=[query])[0]["body"]

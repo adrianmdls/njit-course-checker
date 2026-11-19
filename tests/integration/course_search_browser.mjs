@@ -99,26 +99,35 @@ try {
     console.log('PASS empty local catalog: explanatory message, disabled search, no course search requests')
   } else {
   await waitFor(`Boolean(document.querySelector('#search-term option[value="202710"]'))`)
-  // Reproduce Spring 2027 / All Departments / no query / All Statuses explicitly.
-  await evaluate(`setField('search-term','202710'); setField('search-department',''); setField('search-number',''); setField('search-status','')`)
+  assert.ok(await evaluate(`document.querySelector('button[type=submit]').disabled`))
+  assert.ok(await evaluate(`document.querySelector('#search-department option[value=""]').disabled`))
+  assert.ok(await evaluate(`!document.querySelector('#search-department').textContent.includes('All Departments')`))
+  assert.equal(requests.length, 0, 'loading options never submits an implicit search')
+  // Spring 2027 requires an explicit department, including without a course query.
+  await evaluate(`setField('search-term','202710'); setField('search-department','CS'); setField('search-number',''); setField('search-status','')`)
   await evaluate(`document.querySelector('button[type=submit]').click()`)
   await waitFor(`document.querySelectorAll('tbody tr').length===50`)
   assert.deepEqual(Object.fromEntries(requests.at(-1).searchParams), {
-    term:'202710', sort:'course', order:'asc', limit:'50', offset:'0',
+    term:'202710', subject:'CS', sort:'course', order:'asc', limit:'50', offset:'0',
   })
   assert.equal(responses.at(-1).response.status, 200)
   const raw = await send('Network.getResponseBody', { requestId: responses.at(-1).requestId })
   const unfiltered = JSON.parse(raw.base64Encoded ? Buffer.from(raw.body, 'base64').toString() : raw.body)
   assert.deepEqual(unfiltered.pagination, { limit:50, offset:0, total:53 })
-  console.log('Spring unfiltered request:', requests.at(-1).search, 'HTTP', responses.at(-1).response.status, JSON.stringify(unfiltered.pagination))
+  console.log('Spring department request:', requests.at(-1).search, 'HTTP', responses.at(-1).response.status, JSON.stringify(unfiltered.pagination))
   assert.deepEqual(await evaluate(`[...document.querySelector('#search-department').options].map(option=>option.value)`), ['', 'CS'])
-  await evaluate(`setField('search-department','CS'); setField('search-term','202795')`)
+  await evaluate(`setField('search-term','202795')`)
+  await waitFor(`document.querySelectorAll('tbody tr').length===0 && !button('Next')`)
   assert.equal(await evaluate(`document.querySelector('#search-department').value`), '')
+  assert.ok(await evaluate(`document.querySelector('button[type=submit]').disabled`))
   assert.deepEqual(await evaluate(`[...document.querySelector('#search-department').options].map(option=>option.value)`), ['', 'IT'])
-  // Paging the still-visible results must keep the submitted Spring filters.
-  await evaluate(`button('Next').click()`)
-  await waitFor(`document.querySelectorAll('tbody tr').length===3`)
-  assert.equal(requests.at(-1).searchParams.get('term'), '202710')
+  assert.equal(await evaluate(`document.querySelector('#search-number').value`), '')
+  const searchesBeforeDepartment = requests.length
+  await evaluate(`setField('search-department','IT')`)
+  await evaluate(`document.querySelector('button[type=submit]').click()`)
+  await waitFor(`document.querySelectorAll('tbody tr').length===2`)
+  assert.equal(requests.length, searchesBeforeDepartment + 1)
+  assert.equal(requests.at(-1).searchParams.get('subject'), 'IT')
   await evaluate(`setField('search-term','202710')`)
   await waitFor(`Boolean(document.getElementById('search-term'))`)
   await evaluate(`setField('search-department','CS'); setField('search-number',' cs  100 '); setField('search-sort','crn'); setField('search-order','asc')`)
@@ -156,7 +165,7 @@ try {
   await waitFor(`document.querySelectorAll('tbody tr').length===17`)
   assert.equal(requests.at(-1).searchParams.get('status'), 'CANCELLED')
   assert.ok(await evaluate(`[...document.querySelectorAll('tbody tr')].every(row=>row.children[5].textContent.trim()==='Cancelled')`))
-  await evaluate(`setField('search-department',''); setField('search-number','99999'); setField('search-status','')`)
+  await evaluate(`setField('search-number','99999'); setField('search-status','')`)
   await evaluate(`document.querySelector('button[type=submit]').click()`)
   await waitFor(`document.body.textContent.includes('No matching course sections found')`)
   assert.ok(await evaluate(`button('Previous').disabled && button('Next').disabled`))
@@ -205,7 +214,8 @@ try {
   await evaluate(`button('Search Courses').click()`)
   await waitFor(`location.pathname==='/login' && Boolean(document.getElementById('password'))`)
   assert.deepEqual(errors, [])
-  console.log('PASS real React → Nginx → Express → MariaDB: catalog options/retry, term-dependent departments, unfiltered Spring, parameters, rows, statuses/nulls, persistent Add/reload/Remove, watchlist retries, duplicate-click protection, pagination snapshots, empty results, session expiry')
+  assert.ok(requests.every(url => url.searchParams.get('subject')), 'every search specifies a department')
+  console.log('PASS real React → Nginx → Express → MariaDB: catalog options/retry, mandatory departments, term switching, Spring search, parameters, rows, statuses/nulls, persistent Add/reload/Remove, watchlist retries, duplicate-click protection, pagination, empty results, session expiry')
   }
 } finally {
   ws?.close()

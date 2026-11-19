@@ -90,6 +90,18 @@ class ProbeAuthenticationTests(unittest.TestCase):
             session.post.assert_not_called()
             session.get.assert_called_once_with("http://frontend/api/watchlist", timeout=10)
 
+    def test_expired_browser_fixture_can_log_in_again_without_registration(self):
+        with patch.dict(os.environ, {"APP_ORIGIN": "http://test.invalid"}, clear=True), \
+             patch.object(probe.requests, "Session") as session_factory:
+            session = session_factory.return_value.__enter__.return_value
+            session.cookies = requests.cookies.RequestsCookieJar()
+            session.cookies.set("njit.sid", "renewed-signed-cookie")
+            self.assertEqual(probe.run({"mode": "authenticate", "register": False}),
+                             {"cookies": {"njit.sid": "renewed-signed-cookie"}})
+            self.assertEqual(session.post.call_count, 1)
+            self.assertEqual(session.post.call_args.args[0], "http://frontend/api/auth/login")
+            session.post.return_value.raise_for_status.assert_called_once_with()
+
 
 if __name__ == "__main__":
     unittest.main()

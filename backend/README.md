@@ -14,7 +14,7 @@ For installation, environment setup, and database initialization, see the [root 
 | POST | `/api/auth/logout` | `{}`; destroys the session and clears the cookie (`204`) |
 | GET | `/api/auth/me` | Returns the current user (`200`) or unauthenticated/expired session (`401`) |
 | GET | `/api/courses/options` | Session-authenticated locally available terms and departments (`200`) |
-| GET | `/api/courses` | Session-authenticated section search; requires `term`, returns sections and pagination (`200`) |
+| GET | `/api/courses` | Session-authenticated section search; requires `term` and `subject`, returns sections and pagination (`200`) |
 | GET | `/api/internal/sync/targets` | Bearer-authenticated unique Watchlist and explicit subject/term pairs (`200`) |
 | POST | `/api/internal/sync/department` | Bearer-authenticated department snapshot; returns processed course, section, and status-change counts (`200`) |
 
@@ -41,7 +41,7 @@ Production requires HTTPS through the trusted proxy.
 | Parameter | Values |
 |---|---|
 | `term` | Required six-digit Banner code ending in `10`, `50`, `90`, or `95` (Winter) |
-| `subject` | Optional uppercase department code, starting with a letter, at most 10 alphanumeric characters |
+| `subject` | Required uppercase department code, starting with a letter, at most 10 alphanumeric characters |
 | `query` | Optional course number prefix, such as `280`, or full code, such as `CS 280`; case and whitespace are normalized |
 | `status` | Optional stored `OPEN`, `CLOSED`, or `CANCELLED` status |
 | `sort` | `course` (default), `crn`, or `availability` |
@@ -50,7 +50,8 @@ Production requires HTTPS through the trusted proxy.
 | `offset` | Integer from 0 to 2147483647; default 0 |
 
 Unknown parameters, duplicate parameters, invalid values, and conflicting
-subjects in `subject` and `query` return `400`. A course number prefix starts
+subjects in `subject` and `query` return `400`. A full course query does not
+replace the required `subject` parameter. A course number prefix starts
 with a digit and contains at most 20 alphanumeric characters; raw queries are
 limited to 100 characters. Pagination accepts decimal digits only.
 
@@ -58,8 +59,8 @@ Examples using a cookie jar saved during login:
 
 ```sh
 curl -b cookies.txt 'http://localhost:8080/api/courses?term=202710&subject=CS'
-curl -b cookies.txt 'http://localhost:8080/api/courses?term=202795&query=CS%20280&status=OPEN'
-curl -b cookies.txt 'http://localhost:8080/api/courses?term=202710&sort=availability&order=desc&limit=20&offset=20'
+curl -b cookies.txt 'http://localhost:8080/api/courses?term=202795&subject=CS&query=CS%20280&status=OPEN'
+curl -b cookies.txt 'http://localhost:8080/api/courses?term=202710&subject=CS&sort=availability&order=desc&limit=20&offset=20'
 ```
 
 The response is `{ "sections": [...], "pagination": { "limit": 50, "offset": 0,
