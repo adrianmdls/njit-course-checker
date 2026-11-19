@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Search, BookmarkPlus, Check } from 'lucide-react'
 import { useAuth } from '../auth'
+import departmentNames from '../data/departmentNames'
 
 function termLabel(code) {
   const year = Number(code.slice(0, 4))
@@ -16,6 +17,11 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
   const [optionsError, setOptionsError] = useState('')
   const [optionsAttempt, setOptionsAttempt] = useState(0)
   const [department, setDepartment] = useState('')
+  const [departmentText, setDepartmentText] = useState('')
+  const [departmentOpen, setDepartmentOpen] = useState(false)
+  const [activeDepartment, setActiveDepartment] = useState(-1)
+  const departmentInput = useRef(null)
+  const departmentList = useRef(null)
   const [courseNumber, setCourseNumber] = useState('')
   const [status, setStatus] = useState('')
   const [sort, setSort] = useState('course')
@@ -29,6 +35,17 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
   const selectedTerm = options?.terms.find(entry => entry.code === term)
   const departments = selectedTerm?.departments ?? []
   const canSearch = Boolean(selectedTerm) && departments.includes(department)
+
+  const departmentLabel = code => departmentNames[code] ? `${code} — ${departmentNames[code]}` : code
+  const normalizeDepartment = text => text.replace(/[–—]/g, ' ').trim().replace(/\s+/g, ' ').toLowerCase()
+  const visibleDepartments = departments.filter(code =>
+    normalizeDepartment(departmentLabel(code)).includes(normalizeDepartment(departmentText)))
+
+  useEffect(() => {
+    if (departmentOpen && activeDepartment >= 0) {
+      departmentList.current?.children[activeDepartment]?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [departmentOpen, activeDepartment])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -75,7 +92,7 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
       }
       if (!response.ok) {
         setError(response.status === 400
-          ? 'Check your search filters. Use a course number or code such as CS 280, with a matching department.'
+          ? 'Check your search filters. Use a course number such as 280 for the selected department.'
           : 'Course search is temporarily unavailable. Please try again.')
         return
       }
@@ -100,6 +117,14 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
     setPagination({ limit: 50, offset: 0, total: 0 })
     setLoading(false)
     setError('')
+  }
+
+  function chooseDepartment(code) {
+    if (code !== department) clearSearch()
+    setDepartment(code)
+    setDepartmentText('')
+    setDepartmentOpen(false)
+    setActiveDepartment(-1)
   }
 
   function handleSearch(event) {
@@ -133,6 +158,9 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
               setTerm(code)
               const available = options?.terms.find(entry => entry.code === code)?.departments ?? []
               if (!available.includes(department)) setDepartment('')
+              setDepartmentText('')
+              setDepartmentOpen(false)
+              setActiveDepartment(-1)
             }}
             className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
           >
@@ -141,34 +169,83 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
           </select>
         </div>
 
-        <div>
-          <label htmlFor="search-department" className="mb-2 block font-semibold">
-            Department
-          </label>
-          <select
-            id="search-department"
-            value={department}
-            disabled={!selectedTerm || !departments.length}
-            onChange={(event) => {
-              const subject = event.target.value
-              if (subject === department) return
-              clearSearch()
-              setDepartment(subject)
-            }}
-            className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
-          >
-            <option value="" disabled>Select department</option>
-            {departments.map((subject) => (
-              <option key={subject} value={subject}>
-                {subject}
-              </option>
-            ))}
-          </select>
+        <div className="relative min-w-0" onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) {
+            setDepartmentOpen(false)
+            setActiveDepartment(-1)
+          }
+        }}>
+          <label htmlFor="search-department" className="mb-2 block font-semibold">Department</label>
+          <div className="relative">
+            <input
+              ref={departmentInput}
+              id="search-department"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={departmentOpen}
+              aria-controls="department-options"
+              aria-required="true"
+              aria-describedby="department-help"
+              aria-activedescendant={departmentOpen && activeDepartment >= 0 && visibleDepartments[activeDepartment]
+                ? `department-option-${visibleDepartments[activeDepartment]}` : undefined}
+              autoComplete="off"
+              value={department ? departmentLabel(department) : departmentText}
+              disabled={!selectedTerm || !departments.length}
+              placeholder="Select department"
+              onFocus={() => { setDepartmentOpen(true); setActiveDepartment(-1) }}
+              onClick={() => setDepartmentOpen(true)}
+              onChange={(event) => {
+                clearSearch()
+                setDepartment('')
+                setDepartmentText(event.target.value)
+                setDepartmentOpen(true)
+                setActiveDepartment(-1)
+              }}
+              onKeyDown={(event) => {
+                if (event.nativeEvent?.isComposing) return
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setDepartmentOpen(true)
+                  const count = visibleDepartments.length
+                  setActiveDepartment(count ? (activeDepartment < 0
+                    ? event.key === 'ArrowDown' ? 0 : count - 1
+                    : (activeDepartment + (event.key === 'ArrowDown' ? 1 : -1) + count) % count) : -1)
+                } else if (event.key === 'Enter' && departmentOpen) {
+                  event.preventDefault()
+                  if (activeDepartment >= 0 && visibleDepartments[activeDepartment]) chooseDepartment(visibleDepartments[activeDepartment])
+                } else if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setDepartmentOpen(false)
+                  setActiveDepartment(-1)
+                }
+              }}
+              className="w-full rounded-md border border-slate-300 bg-white py-3 pl-4 pr-14"
+            />
+            {(department || departmentText) && <button
+              type="button" aria-label="Clear department"
+              onClick={() => { chooseDepartment(''); setDepartmentOpen(true); departmentInput.current?.focus() }}
+              className="absolute inset-y-0 right-0 min-w-12 cursor-pointer rounded-r-md px-3 text-xl hover:bg-slate-100"
+            >×</button>}
+          </div>
+          <p id="department-help" className="mt-1 text-sm text-slate-500">Type a code or name, then select a department.</p>
+          {departmentOpen && <div>
+            <ul id="department-options" ref={departmentList} role="listbox" aria-label="Departments"
+              className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-slate-300 bg-white shadow-lg">
+              {visibleDepartments.map((code, index) => <li
+                key={code} id={`department-option-${code}`} role="option" aria-selected={department === code}
+                onMouseDown={event => event.preventDefault()}
+                onClick={() => { chooseDepartment(code); departmentInput.current?.focus() }}
+                className={`cursor-pointer px-4 py-3 break-words hover:bg-red-50 ${activeDepartment === index ? 'bg-red-50 outline-2 outline-inset outline-red-700' : ''}`}
+              >{departmentLabel(code)}</li>)}
+            </ul>
+            <p role="status" className="sr-only">{visibleDepartments.length ? `${visibleDepartments.length} departments available` : 'No matching departments'}</p>
+            {!visibleDepartments.length && <p className="mt-2 text-sm text-slate-600">No matching departments</p>}
+          </div>}
         </div>
 
         <div>
           <label htmlFor="search-number" className="mb-2 block font-semibold">
-            Course Number or Code
+            Course Number (Optional)
           </label>
           <input
             id="search-number"
@@ -176,7 +253,7 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
             maxLength={100}
             value={courseNumber}
             onChange={(event) => setCourseNumber(event.target.value)}
-            placeholder="e.g., 280 or CS 280"
+            placeholder="e.g., 280, 340, 490"
             className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
           />
         </div>

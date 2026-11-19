@@ -56,7 +56,8 @@ export async function componentHarness(fetch, auth = { refresh() {} }) {
   synthetic('lucide-react', { Search: 'Search', BookmarkPlus: 'BookmarkPlus', Check: 'Check', Bookmark: 'Bookmark', Trash2: 'Trash2' })
   async function load(name) {
     if (modules.has(name)) return modules.get(name)
-    const file = new URL(name === '../auth' ? '../src/auth.jsx'
+    const file = new URL(name === '../data/departmentNames' ? '../src/data/departmentNames.js'
+      : name === '../auth' ? '../src/auth.jsx'
       : name === '../components/SearchCourses' ? '../src/components/SearchCourses.jsx' : name, import.meta.url)
     const { code } = transformSync(file.pathname, await readFile(file, 'utf8'), { jsx: { runtime: 'classic', pragma: 'element' } })
     const module = new vm.SourceTextModule(code, { context, identifier: file.href })
