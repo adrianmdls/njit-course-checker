@@ -4,6 +4,9 @@ import { Bookmark, Search, Trash2 } from 'lucide-react'
 import { useAuth } from '../auth'
 
 import SearchCourses from '../components/SearchCourses'
+import LastSeen from '../components/LastSeen'
+import CourseAvailabilityInfo from '../components/CourseAvailabilityInfo'
+import { termLabel } from '../utils/courseFormatting'
 
 export default function Dashboard() {
   const { refresh } = useAuth()
@@ -129,80 +132,85 @@ export default function Dashboard() {
         {!loading && !loaded && <button type="button" onClick={() => setAttempt(value => value + 1)} className="mt-3 rounded-md border border-slate-300 px-4 py-2 font-semibold">Retry watchlist</button>}
 
         {activeTab === 'watchlist' ? (
-          <div className="mt-6 overflow-x-auto rounded-md border border-slate-200">
-            <table className="w-full min-w-[1000px] border-collapse text-left text-[#0B1733]">
-              <thead className="bg-slate-50">
-                <tr>
-                  {['CRN', 'Course', 'Term', 'Section', 'Max', 'Now', 'Status', 'Last Seen', 'Remove'].map((heading) => (
-                    <th
-                      key={heading}
-                      className="px-5 py-4 text-sm font-semibold whitespace-nowrap"
-                    >
-                      {heading}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
+          <section className="mt-6" aria-labelledby="watchlist-heading">
+            <h2 id="watchlist-heading" className="mb-4 text-xl font-bold">Watchlist ({courses.length})</h2>
+            <CourseAvailabilityInfo />
+            <div className="overflow-x-auto rounded-md border border-slate-200">
+              <table className="w-full min-w-[1000px] border-collapse text-left text-[#0B1733]">
+                <thead className="bg-slate-50">
+                  <tr>
+                    {['CRN', 'Course', 'Term', 'Section', 'Capacity', 'Enrolled', 'Status', 'Last Seen', 'Remove'].map((heading) => (
+                      <th
+                        key={heading}
+                        className={`px-5 py-4 text-sm font-semibold whitespace-nowrap ${['Capacity', 'Enrolled'].includes(heading) ? 'text-right' : ''}`}
+                      >
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
 
-              <tbody>
-                {courses.map((course) => {
-                  const unavailable = course.is_active === false
-                  const statusLabel = unavailable ? 'Unavailable'
-                    : { OPEN: 'Open', CLOSED: 'Closed', CANCELLED: 'Cancelled' }[course.status] ?? 'Unknown'
+                <tbody>
+                  {courses.map((course) => {
+                    const unavailable = course.is_active === false
+                    const statusLabel = unavailable ? 'Unavailable'
+                      : { OPEN: 'Open', CLOSED: 'Closed', CANCELLED: 'Cancelled' }[course.status] ?? 'Unknown'
 
-                  return (
-                    <tr key={course.section_id} className="border-t border-slate-200">
-                      <td className="px-5 py-3">{course.crn}</td>
+                    return (
+                      <tr key={course.section_id} className="border-t border-slate-200 hover:bg-slate-50">
+                        <td className="px-5 py-3">{course.crn}</td>
 
-                      <td className="px-5 py-3 font-bold whitespace-nowrap">
-                        <span title={course.title ?? undefined}>{course.course}</span>
-                      </td>
+                        <td className="px-5 py-3 font-bold whitespace-nowrap">
+                          <span title={course.title ?? undefined}>{course.course}</span>
+                        </td>
 
-                      <td className="px-5 py-3 whitespace-nowrap">{course.term}</td>
-                      <td className="px-5 py-3">{course.section ?? '—'}</td>
-                      <td className="px-5 py-3">{unavailable ? '—' : course.max ?? '—'}</td>
-                      <td className="px-5 py-3">{unavailable ? '—' : course.now ?? '—'}</td>
+                        <td className="px-5 py-3 whitespace-nowrap">{termLabel(course.term)}</td>
+                        <td className="px-5 py-3">{course.section ?? '—'}</td>
+                        <td className="px-5 py-3 text-right tabular-nums">{unavailable ? '—' : course.max ?? '—'}</td>
+                        <td className="px-5 py-3 text-right tabular-nums">{unavailable ? '—' : course.now ?? '—'}</td>
 
-                      <td className="px-5 py-3">
-                        <span
-                          className={`inline-block min-w-[95px] rounded-md px-4 py-2 text-center font-semibold ${
-                            unavailable ? 'bg-slate-100 text-slate-600' : course.status === 'OPEN'
-                              ? 'bg-green-100 text-green-700'
-                              : course.status === 'CLOSED' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          {statusLabel}
-                        </span>
-                        {unavailable && <p className="mt-1 text-xs text-slate-500">Previously marked unavailable; awaiting a new Banner observation.</p>}
-                      </td>
+                        <td className="px-5 py-3">
+                          <span
+                            className={`inline-block min-w-[95px] rounded-md px-3 py-2 text-center font-semibold ${
+                              unavailable ? 'bg-slate-100 text-slate-600' : course.status === 'OPEN'
+                                ? 'bg-green-100 text-green-700'
+                                : course.status === 'CLOSED' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {statusLabel}
+                          </span>
+                          {unavailable && <p className="mt-1 text-xs text-slate-500">Previously marked unavailable; awaiting a new Banner observation.</p>}
+                        </td>
 
-                      <td className="px-5 py-3 whitespace-nowrap">
-                        {course.last_checked_at ? new Date(course.last_checked_at).toLocaleString() : 'Not checked yet'}
-                      </td>
+                        <td className="px-5 py-3">
+                          <LastSeen timestamp={course.last_checked_at} />
+                        </td>
 
-                      <td className="px-5 py-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => changeWatchlist(course, true)}
-                          disabled={loading || !loaded || pendingId !== null}
-                          aria-label={`Remove ${course.course} section ${course.section ?? "unknown"} (${course.term}) from watchlist`}
-                          className="cursor-pointer rounded-md bg-red-100 p-2 text-red-600 hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {pendingId === course.section_id ? 'Removing…' : <Trash2 size={20} />}
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                        <td className="px-5 py-3">
+                          <button
+                            type="button"
+                            onClick={() => changeWatchlist(course, true)}
+                            disabled={loading || !loaded || pendingId !== null}
+                            aria-label={`Remove ${course.course} section ${course.section ?? "unknown"} (${course.term}) from watchlist`}
+                            title={`Remove ${course.course} section ${course.section ?? "unknown"} from watchlist`}
+                            className="flex min-h-10 cursor-pointer items-center justify-center rounded-md bg-red-100 px-3 py-2 text-red-600 hover:bg-red-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {pendingId === course.section_id ? 'Removing…' : <Trash2 size={18} />}
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
 
-            {loaded && !loading && courses.length === 0 && (
-              <p className="p-10 text-center text-slate-500">
-                Your watchlist is empty.
-              </p>
-            )}
-          </div>
+              {loaded && !loading && courses.length === 0 && (
+                <p className="p-8 text-center text-slate-500">
+                  Your watchlist is empty.
+                </p>
+              )}
+            </div>
+          </section>
         ) : (
             <SearchCourses courses={courses} onAdd={changeWatchlist} watchlistReady={loaded && !loading} pendingId={pendingId} />
         )}

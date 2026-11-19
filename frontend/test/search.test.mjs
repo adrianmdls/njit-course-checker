@@ -351,3 +351,25 @@ for (const code of ['IT', '']) {
     host.unmount()
   })
 }
+
+test('search tables expose section observations, consistent headers and availability guidance', async () => {
+  const { host, requests, added } = await setup()
+  await select(host, 'search-department', 'CS')
+  submit(host)
+  const seen = '2000-01-01T00:00:00.000Z'
+  requests[0].resolve(reply(200, { ...result, sections: [
+    { ...section, last_checked_at: seen }, { ...section, id: 8, last_checked_at: null },
+  ] }))
+  await host.flush()
+  for (const label of ['Capacity','Enrolled','Last Seen','Watchlist']) {
+    assert.ok(host.find(node=>node.type==='th' && node.props.children.includes(label)))
+  }
+  const observed=host.find(node=>node.type==='tr' && node.props.key===7)
+  const missing=host.find(node=>node.type==='tr' && node.props.key===8)
+  assert.equal(observed.props.children[6].props.children[0].props.timestamp,seen)
+  assert.equal(missing.props.children[6].props.children[0].props.timestamp,null)
+  assert.ok(host.find(node=>node.type?.name==='CourseAvailabilityInfo'))
+  button(host,'Add').props.onClick()
+  assert.equal(added[0].last_checked_at,seen)
+  host.unmount()
+})

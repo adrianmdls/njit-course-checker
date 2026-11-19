@@ -3,12 +3,11 @@ import { useEffect, useRef, useState } from 'react'
 import { Search, BookmarkPlus, Check } from 'lucide-react'
 import { useAuth } from '../auth'
 import departmentNames from '../data/departmentNames'
+import { termLabel } from '../utils/courseFormatting'
+import LastSeen from './LastSeen'
+import CourseAvailabilityInfo from './CourseAvailabilityInfo'
 
-function termLabel(code) {
-  const year = Number(code.slice(0, 4))
-  const season = { '10': 'Spring', '50': 'Summer', '90': 'Fall', '95': 'Winter' }[code.slice(4)]
-  return season ? `${season} ${year}${code.endsWith('95') ? `–${year + 1}` : ''}` : code
-}
+const filterControlClass = 'h-12 w-full min-w-0 rounded-md border border-slate-300 bg-white px-4 text-base text-slate-900 outline-none focus:border-red-700 focus:ring-2 focus:ring-red-700/20 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500'
 
 export default function SearchCourses({ courses, onAdd, watchlistReady, pendingId }) {
   const { refresh } = useAuth()
@@ -141,7 +140,7 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
     <section className="mt-6">
       <form
         onSubmit={handleSearch}
-        className="grid grid-cols-1 gap-5 rounded-lg bg-slate-50 p-6 md:grid-cols-3"
+        className="grid grid-cols-1 items-end gap-5 rounded-lg bg-slate-50 p-6 md:grid-cols-3"
       >
         <div>
           <label htmlFor="search-term" className="mb-2 block font-semibold">
@@ -162,7 +161,7 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
               setDepartmentOpen(false)
               setActiveDepartment(-1)
             }}
-            className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
+            className={filterControlClass}
           >
             {!options?.terms.length && <option value="">{options ? 'No local terms available' : 'Loading terms…'}</option>}
             {options?.terms.map(entry => <option key={entry.code} value={entry.code}>{termLabel(entry.code)}</option>)}
@@ -219,28 +218,28 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
                   setActiveDepartment(-1)
                 }
               }}
-              className="w-full rounded-md border border-slate-300 bg-white py-3 pl-4 pr-14"
+              className={`${filterControlClass} pr-12`}
             />
             {(department || departmentText) && <button
               type="button" aria-label="Clear department"
               onClick={() => { chooseDepartment(''); setDepartmentOpen(true); departmentInput.current?.focus() }}
               className="absolute inset-y-0 right-0 min-w-12 cursor-pointer rounded-r-md px-3 text-xl hover:bg-slate-100"
             >×</button>}
+            {departmentOpen && <div className="absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+              <ul id="department-options" ref={departmentList} role="listbox" aria-label="Departments"
+                className="max-h-44 overflow-y-auto">
+                {visibleDepartments.map((code, index) => <li
+                  key={code} id={`department-option-${code}`} role="option" aria-selected={department === code}
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={() => { chooseDepartment(code); departmentInput.current?.focus() }}
+                  className={`cursor-pointer px-4 py-2 text-sm leading-5 break-words hover:bg-red-50 ${activeDepartment === index ? 'bg-red-50 outline-2 outline-inset outline-red-700' : ''}`}
+                >{departmentLabel(code)}</li>)}
+              </ul>
+              <p role="status" className="sr-only">{visibleDepartments.length ? `${visibleDepartments.length} departments available` : 'No matching departments'}</p>
+              {!visibleDepartments.length && <p className="px-4 py-2 text-sm text-slate-600">No matching departments</p>}
+            </div>}
           </div>
-          <p id="department-help" className="mt-1 text-sm text-slate-500">Type a code or name, then select a department.</p>
-          {departmentOpen && <div>
-            <ul id="department-options" ref={departmentList} role="listbox" aria-label="Departments"
-              className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-slate-300 bg-white shadow-lg">
-              {visibleDepartments.map((code, index) => <li
-                key={code} id={`department-option-${code}`} role="option" aria-selected={department === code}
-                onMouseDown={event => event.preventDefault()}
-                onClick={() => { chooseDepartment(code); departmentInput.current?.focus() }}
-                className={`cursor-pointer px-4 py-3 break-words hover:bg-red-50 ${activeDepartment === index ? 'bg-red-50 outline-2 outline-inset outline-red-700' : ''}`}
-              >{departmentLabel(code)}</li>)}
-            </ul>
-            <p role="status" className="sr-only">{visibleDepartments.length ? `${visibleDepartments.length} departments available` : 'No matching departments'}</p>
-            {!visibleDepartments.length && <p className="mt-2 text-sm text-slate-600">No matching departments</p>}
-          </div>}
+          <p id="department-help" className="sr-only">Type a code or name, then select a department.</p>
         </div>
 
         <div>
@@ -254,7 +253,7 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
             value={courseNumber}
             onChange={(event) => setCourseNumber(event.target.value)}
             placeholder="e.g., 280, 340, 490"
-            className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
+            className={filterControlClass}
           />
         </div>
 
@@ -264,7 +263,7 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
             id="search-status"
             value={status}
             onChange={(event) => setStatus(event.target.value)}
-            className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
+            className={filterControlClass}
           >
             <option value="">All Statuses</option>
             <option value="OPEN">Open</option>
@@ -279,7 +278,7 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
             id="search-sort"
             value={sort}
             onChange={(event) => setSort(event.target.value)}
-            className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
+            className={filterControlClass}
           >
             <option value="course">Course</option>
             <option value="crn">CRN</option>
@@ -293,7 +292,7 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
             id="search-order"
             value={order}
             onChange={(event) => setOrder(event.target.value)}
-            className="w-full rounded-md border border-slate-300 bg-white px-4 py-3"
+            className={filterControlClass}
           >
             <option value="asc">Ascending</option>
             <option value="desc">Descending</option>
@@ -330,12 +329,13 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
             Search Results ({pagination.total})
           </h2>
 
+          <CourseAvailabilityInfo />
           <div className="overflow-x-auto rounded-md border border-slate-200">
-            <table className="w-full min-w-[750px] text-left">
+            <table className="w-full min-w-[1000px] text-left">
               <thead className="bg-slate-50">
                 <tr>
-                  {['CRN', 'Course', 'Section', 'Max', 'Now', 'Status', 'Watchlist'].map((heading) => (
-                    <th key={heading} className="px-5 py-4 font-semibold">
+                  {['CRN', 'Course', 'Section', 'Capacity', 'Enrolled', 'Status', 'Last Seen', 'Watchlist'].map((heading) => (
+                    <th key={heading} className={`px-5 py-4 text-sm font-semibold whitespace-nowrap ${['Capacity', 'Enrolled'].includes(heading) ? 'text-right' : ''}`} >
                       {heading}
                     </th>
                   ))}
@@ -352,15 +352,15 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
                   )
 
                   return (
-                    <tr key={section.id} className="border-t border-slate-200">
+                    <tr key={section.id} className="border-t border-slate-200 hover:bg-slate-50">
                       <td className="px-5 py-3">{section.crn}</td>
-                      <td className="px-5 py-3 font-bold">{section.course}</td>
+                      <td className="px-5 py-3 font-bold whitespace-nowrap">{section.course}</td>
                       <td className="px-5 py-3">{section.section ?? '—'}</td>
-                      <td className="px-5 py-3">{section.max ?? '—'}</td>
-                      <td className="px-5 py-3">{section.now ?? '—'}</td>
+                      <td className="px-5 py-3 text-right tabular-nums">{section.max ?? '—'}</td>
+                      <td className="px-5 py-3 text-right tabular-nums">{section.now ?? '—'}</td>
 
                       <td className="px-5 py-3">
-                        <span className={`inline-block min-w-[85px] rounded-md px-3 py-2 text-center font-semibold ${
+                        <span className={`inline-block min-w-[95px] rounded-md px-3 py-2 text-center font-semibold ${
                           section.status === 'OPEN'
                             ? 'bg-green-100 text-green-700'
                             : section.status === 'CLOSED'
@@ -371,12 +371,14 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
                         </span>
                       </td>
 
+                      <td className="px-5 py-3"><LastSeen timestamp={section.last_checked_at} /></td>
+
                       <td className="px-5 py-3">
                         <button
                           type="button"
                           disabled={isWatched || !watchlistReady || pendingId !== null}
                           onClick={() => onAdd(section)}
-                          className={`flex items-center gap-2 rounded-md px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${
+                          className={`flex items-center gap-2 rounded-md px-3 py-2 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-60 ${
                             isWatched
                               ? 'cursor-not-allowed bg-slate-100 text-slate-500'
                               : 'cursor-pointer bg-red-100 text-[#D60000] hover:bg-red-200'
