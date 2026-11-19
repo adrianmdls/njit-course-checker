@@ -199,12 +199,48 @@ try {
   const unfiltered = JSON.parse(raw.base64Encoded ? Buffer.from(raw.body, 'base64').toString() : raw.body)
   assert.deepEqual(unfiltered.pagination, { limit:50, offset:0, total:53 })
   assert.deepEqual(await evaluate(`[...document.querySelectorAll('thead th')].map(node=>node.textContent.trim())`),
-    ['CRN','Course','Section','Capacity','Enrolled','Status','Last Seen','Watchlist'])
+    ['CRN','Course','Section','Capacity','Enrolled','Status','Last Checked','Watchlist'])
   assert.equal(await evaluate(`document.querySelector('tbody tr time').dateTime`), unfiltered.sections[0].last_checked_at)
-  assert.ok(await evaluate(`document.body.textContent.includes('About Course Availability') && document.body.textContent.includes('Last Seen shows when each section was last observed in NJIT Banner.')`))
+  assert.ok(await evaluate(`document.body.textContent.includes('About Course Availability') && document.body.textContent.includes('Last Checked shows when each section was last observed in NJIT Banner.')`))
   await send('Emulation.setFocusEmulationEnabled', { enabled: true })
+  const infoButton = `document.querySelector('button[aria-label="About Course Availability"]')`
+  const infoOpen = `Boolean(document.querySelector('[popover]:popover-open'))`
+  assert.equal(await evaluate(infoOpen), false)
+  await evaluate(`${infoButton}.focus()`)
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+  await waitFor(infoOpen)
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  await waitFor(`!${infoOpen}`)
+  await evaluate(`${infoButton}.click()`)
+  await waitFor(infoOpen)
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 20, y: 100, button: 'left', clickCount: 1 })
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 20, y: 100, button: 'left', clickCount: 1 })
+  await waitFor(`!${infoOpen}`)
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+  await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
+  await evaluate(`${infoButton}.scrollIntoView({block:'center'})`)
+  const touch = await evaluate(`(()=>{const r=${infoButton}.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [touch] })
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await waitFor(infoOpen)
+  assert.ok(await evaluate(`(()=>{const r=document.querySelector('[popover]:popover-open').getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight})()`))
+  const outsideTouch = await evaluate(`(()=>{const r=document.querySelector('h2').getBoundingClientRect();return {x:r.left+2,y:r.top+r.height/2}})()`)
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [outsideTouch] })
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await waitFor(`!${infoOpen}`)
+  await send('Emulation.setTouchEmulationEnabled', { enabled: false })
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
+  console.log('PASS availability popover keyboard/Escape, outside click, touch activation/dismissal, and mobile bounds')
+  const rowBefore = await evaluate(`(()=>{const r=document.querySelector('tbody tr').getBoundingClientRect();return {height:r.height,width:r.width}})()`)
   await evaluate(`document.querySelector('tbody tr time').focus()`)
-  assert.ok(await evaluate(`(()=>{const time=document.querySelector('tbody tr time'),detail=time.querySelector('[aria-hidden]');return time===document.activeElement && getComputedStyle(detail).display!=='none' && detail.textContent===time.title})()`))
+  await waitFor(`Boolean(document.querySelector('[role=tooltip]:popover-open'))`)
+  assert.ok(await evaluate(`(()=>{const time=document.querySelector('tbody tr time'),tip=document.querySelector('[role=tooltip]:popover-open');return time===document.activeElement && !time.hasAttribute('title') && time.getAttribute('aria-label').includes(tip.textContent.trim())})()`))
+  assert.deepEqual(await evaluate(`(()=>{const r=document.querySelector('tbody tr').getBoundingClientRect();return {height:r.height,width:r.width}})()`), rowBefore, 'floating exact time cannot resize table rows or columns')
+  await send('Input.dispatchKeyEvent', { type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27 })
+  await send('Input.dispatchKeyEvent', { type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27 })
+  await waitFor(`!document.querySelector('[role=tooltip]:popover-open')`)
   await evaluate(`document.activeElement.blur(); window.scrollTo(0,0)`)
   await writeFile(join(tmpdir(), 'njit-course-ux-search-desktop.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'))
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
@@ -285,9 +321,30 @@ try {
   const watchRow = await evaluate(`[...document.querySelector('tbody tr').children].map(cell=>cell.textContent.trim())`)
   assert.deepEqual(watchRow.slice(0,4), ['12000','CS 100','Spring 2027','000'])
   assert.equal(watchRow[6], 'Open')
+  assert.ok(await evaluate(`document.querySelector('button[aria-label="Email notifications coming soon"]').disabled`))
+  await evaluate(`document.querySelector('[role=group][aria-label="Email notifications coming soon"]').focus()`)
+  assert.ok(await evaluate(`(()=>{const wrapper=document.activeElement;return wrapper.getAttribute('role')==='group' && document.getElementById(wrapper.getAttribute('aria-describedby')).textContent.includes('not yet available')})()`))
+
   assert.deepEqual(await evaluate(`[...document.querySelectorAll('thead th')].map(node=>node.textContent.trim())`),
-    ['CRN','Course','Term','Section','Capacity','Enrolled','Status','Last Seen','Remove'])
+    ['CRN','Course','Term','Section','Capacity','Enrolled','Status','Last Checked','Notify','Remove'])
   assert.ok(await evaluate(`document.getElementById('watchlist-heading').textContent==='Watchlist (1)' && document.body.textContent.includes('About Course Availability')`))
+  for (const width of [1440,768,390]) {
+    await send('Emulation.setDeviceMetricsOverride', {width,height:900,deviceScaleFactor:1,mobile:width<768})
+    await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`)
+    const layout=await evaluate(`(()=>{
+      const table=document.querySelector('table'),headers=[...table.querySelectorAll('th')],cells=[...table.querySelector('tbody tr').children];
+      return {overflow:document.documentElement.scrollWidth>innerWidth,
+        widths:headers.map(node=>node.getBoundingClientRect().width/table.getBoundingClientRect().width),
+        alignment:cells.map(node=>getComputedStyle(node).textAlign),
+        centers:[6,7,8,9].map(i=>{const content=i===6?cells[i].querySelector('span'):i===7?cells[i].querySelector('time'):cells[i].querySelector('button');const a=headers[i].getBoundingClientRect(),b=content.getBoundingClientRect();return Math.abs(a.left+a.width/2-b.left-b.width/2)})}
+    })()`)
+    assert.equal(layout.overflow,false)
+    assert.deepEqual(layout.alignment,['left','left','left','left','right','right','center','center','center','center'])
+    assert.ok(layout.centers.every(delta=>delta<1),JSON.stringify(layout))
+    const proportions=[8,13,13,9,9,9,10,14,9,6]
+    assert.ok(layout.widths.every((value,i)=>Math.abs(value-proportions[i]/100)<0.005))
+  }
+  await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false})
   // Fixture-only activity changes exercise the real watchlist UI; transactional
   // omission/reactivation is independently covered by the API lifecycle test.
   const sectionId = unfiltered.sections[0].id
@@ -298,7 +355,7 @@ try {
     setActivity(false)
     await send('Page.reload')
     await waitFor(`document.querySelectorAll('tbody tr').length===1 && document.body.textContent.includes('Unavailable')`)
-    assert.ok(await evaluate(`document.body.textContent.includes('Last Seen')`))
+    assert.ok(await evaluate(`document.body.textContent.includes('Last Checked')`))
     assert.ok(await evaluate(`!document.querySelector('button[aria-label^="Remove CS 100"]').disabled`))
     await evaluate(`button('Search Courses').click()`)
     await waitFor(`Boolean(document.querySelector('#search-term option[value="202710"]'))`)
@@ -320,6 +377,14 @@ try {
   await evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`)
   await evaluate(`window.scrollTo(0,0)`)
   assert.ok(await evaluate(`document.documentElement.scrollWidth<=innerWidth`))
+  const watchRowHeight = await evaluate(`document.querySelector('tbody tr').getBoundingClientRect().height`)
+  await evaluate(`document.querySelector('tbody tr time').focus()`)
+  await waitFor(`Boolean(document.querySelector('[role=tooltip]:popover-open'))`)
+  assert.equal(await evaluate(`document.querySelector('tbody tr').getBoundingClientRect().height`),watchRowHeight)
+  assert.ok(await evaluate(`(()=>{const r=document.querySelector('[role=tooltip]:popover-open').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight})()`))
+  await evaluate(`document.activeElement.blur()`)
+  await waitFor(`!document.querySelector('[role=tooltip]:popover-open')`)
+  await evaluate(`document.querySelector('table').parentElement.scrollLeft=0;window.scrollTo(0,0)`)
   await writeFile(join(tmpdir(), 'njit-phase3-watchlist-mobile.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'))
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
   await evaluate(`button('Search Courses').click()`)

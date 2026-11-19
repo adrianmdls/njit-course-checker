@@ -12,11 +12,12 @@ export function deferred() {
 export const reply = (status, data) => ({ status, ok: status >= 200 && status < 300, json: async () => data })
 const same = (a, b) => a && b && a.length === b.length && a.every((value, i) => Object.is(value, b[i]))
 
-export async function componentHarness(fetch, auth = { refresh() {} }) {
+export async function componentHarness(fetch, auth = { refresh() {} }, globals = {}) {
   let active
   const element = (type, props, ...children) => ({ type, props: { ...props, children: children.flat(Infinity) } })
   const hooks = {
-    createContext: () => ({ Provider: 'Provider' }), useContext: () => auth,
+    Fragment: 'Fragment', createContext: () => ({ Provider: 'Provider' }), useContext: () => auth,
+    useId: () => 'test-availability-info',
     useState(initial) {
       const host = active, index = host.index++
       if (!(index in host.slots)) host.slots[index] = typeof initial === 'function' ? initial() : initial
@@ -43,7 +44,7 @@ export async function componentHarness(fetch, auth = { refresh() {} }) {
       }
     },
   }
-  const context = vm.createContext({ fetch, AbortController, URLSearchParams, element })
+  const context = vm.createContext({ fetch, AbortController, URLSearchParams, element, setTimeout, clearTimeout, ...globals })
   const modules = new Map()
   function synthetic(name, values) {
     const module = new vm.SyntheticModule(Object.keys(values), function () {
@@ -53,7 +54,7 @@ export async function componentHarness(fetch, auth = { refresh() {} }) {
   }
   synthetic('react', hooks)
   synthetic('react-router', { Navigate: 'Navigate', Outlet: 'Outlet' })
-  synthetic('lucide-react', { Search: 'Search', BookmarkPlus: 'BookmarkPlus', Check: 'Check', Bookmark: 'Bookmark', Trash2: 'Trash2', Info: 'Info' })
+  synthetic('lucide-react', { Search: 'Search', BookmarkPlus: 'BookmarkPlus', Check: 'Check', Bookmark: 'Bookmark', Trash2: 'Trash2', Info: 'Info', Bell: 'Bell', ChevronDown: 'ChevronDown', Clock: 'Clock' })
   async function load(name) {
     if (modules.has(name)) return modules.get(name)
     const file = new URL(name === '../data/departmentNames' ? '../src/data/departmentNames.js'
@@ -61,6 +62,7 @@ export async function componentHarness(fetch, auth = { refresh() {} }) {
       : name === '../components/SearchCourses' ? '../src/components/SearchCourses.jsx'
       : ['../components/LastSeen', './LastSeen'].includes(name) ? '../src/components/LastSeen.jsx'
       : ['../components/CourseAvailabilityInfo', './CourseAvailabilityInfo'].includes(name) ? '../src/components/CourseAvailabilityInfo.jsx'
+      : name === '../utils/positionFloating' ? '../src/utils/positionFloating.js'
       : name === '../utils/courseFormatting' ? '../src/utils/courseFormatting.js' : name, import.meta.url)
     const { code } = transformSync(file.pathname, await readFile(file, 'utf8'), { jsx: { runtime: 'classic', pragma: 'element' } })
     const module = new vm.SourceTextModule(code, { context, identifier: file.href })

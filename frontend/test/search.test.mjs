@@ -361,15 +361,43 @@ test('search tables expose section observations, consistent headers and availabi
     { ...section, last_checked_at: seen }, { ...section, id: 8, last_checked_at: null },
   ] }))
   await host.flush()
-  for (const label of ['Capacity','Enrolled','Last Seen','Watchlist']) {
+  for (const label of ['Capacity','Enrolled','Last Checked','Watchlist']) {
     assert.ok(host.find(node=>node.type==='th' && node.props.children.includes(label)))
   }
   const observed=host.find(node=>node.type==='tr' && node.props.key===7)
   const missing=host.find(node=>node.type==='tr' && node.props.key===8)
+  for (const index of [0,1,2]) assert.match(observed.props.children[index].props.className,/text-left/)
+  for (const index of [3,4]) assert.match(observed.props.children[index].props.className,/text-right/)
+  for (const index of [5,6,7]) assert.match(observed.props.children[index].props.className,/text-center/)
+  for (const label of ['Status','Last Checked','Watchlist']) assert.match(host.find(node=>node.type==='th' && node.props.children.includes(label)).props.className,/text-center/)
+  assert.match(button(host,'Add').props.className,/mx-auto/)
   assert.equal(observed.props.children[6].props.children[0].props.timestamp,seen)
   assert.equal(missing.props.children[6].props.children[0].props.timestamp,null)
   assert.ok(host.find(node=>node.type?.name==='CourseAvailabilityInfo'))
   button(host,'Add').props.onClick()
   assert.equal(added[0].last_checked_at,seen)
+  host.unmount()
+})
+
+test('filter fields retain native selects with one shared decorative chevron per dropdown', async () => {
+  const { host } = await setup()
+  for (const id of ['search-term','search-status','search-sort','search-order']) {
+    const control = field(host,id)
+    assert.equal(control.type,'select')
+    assert.match(control.props.className,/appearance-none/)
+    assert.match(control.props.className,/pr-12/)
+  }
+  const chevrons=[]
+  function walk(node) {
+    if (!node?.props) return
+    if (node.type?.name==='FilterChevron') chevrons.push(node)
+    for (const child of node.props.children??[]) walk(child)
+  }
+  walk(host.tree)
+  assert.equal(chevrons.length,5)
+  assert.ok(chevrons.every(node=>node.type===chevrons[0].type))
+  assert.equal(field(host,'search-department').props.role,'combobox')
+  await select(host,'search-department','CS')
+  assert.ok(host.find(node=>node.props['aria-label']==='Clear department'))
   host.unmount()
 })

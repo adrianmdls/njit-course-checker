@@ -1,6 +1,6 @@
 
 import { useEffect, useRef, useState } from 'react'
-import { Search, BookmarkPlus, Check } from 'lucide-react'
+import { Search, BookmarkPlus, Check, ChevronDown } from 'lucide-react'
 import { useAuth } from '../auth'
 import departmentNames from '../data/departmentNames'
 import { termLabel } from '../utils/courseFormatting'
@@ -8,6 +8,11 @@ import LastSeen from './LastSeen'
 import CourseAvailabilityInfo from './CourseAvailabilityInfo'
 
 const filterControlClass = 'h-12 w-full min-w-0 rounded-md border border-slate-300 bg-white px-4 text-base text-slate-900 outline-none focus:border-red-700 focus:ring-2 focus:ring-red-700/20 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500'
+
+function FilterChevron() {
+  return <ChevronDown size={18} aria-hidden="true"
+    className="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-slate-500" />
+}
 
 export default function SearchCourses({ courses, onAdd, watchlistReady, pendingId }) {
   const { refresh } = useAuth()
@@ -146,26 +151,29 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
           <label htmlFor="search-term" className="mb-2 block font-semibold">
             Term
           </label>
-          <select
-            id="search-term"
-            value={term}
-            disabled={!options?.terms.length}
-            onChange={(event) => {
-              const code = event.target.value
-              if (code === term) return
-              clearSearch()
-              setTerm(code)
-              const available = options?.terms.find(entry => entry.code === code)?.departments ?? []
-              if (!available.includes(department)) setDepartment('')
-              setDepartmentText('')
-              setDepartmentOpen(false)
-              setActiveDepartment(-1)
-            }}
-            className={filterControlClass}
-          >
-            {!options?.terms.length && <option value="">{options ? 'No local terms available' : 'Loading terms…'}</option>}
-            {options?.terms.map(entry => <option key={entry.code} value={entry.code}>{termLabel(entry.code)}</option>)}
-          </select>
+          <div className="relative">
+            <select
+              id="search-term"
+              value={term}
+              disabled={!options?.terms.length}
+              onChange={(event) => {
+                const code = event.target.value
+                if (code === term) return
+                clearSearch()
+                setTerm(code)
+                const available = options?.terms.find(entry => entry.code === code)?.departments ?? []
+                if (!available.includes(department)) setDepartment('')
+                setDepartmentText('')
+                setDepartmentOpen(false)
+                setActiveDepartment(-1)
+              }}
+              className={`${filterControlClass} appearance-none pr-12`}
+            >
+              {!options?.terms.length && <option value="">{options ? 'No local terms available' : 'Loading terms…'}</option>}
+              {options?.terms.map(entry => <option key={entry.code} value={entry.code}>{termLabel(entry.code)}</option>)}
+            </select>
+            <FilterChevron />
+          </div>
         </div>
 
         <div className="relative min-w-0" onBlur={(event) => {
@@ -218,12 +226,13 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
                   setActiveDepartment(-1)
                 }
               }}
-              className={`${filterControlClass} pr-12`}
+              className={`${filterControlClass} ${department || departmentText ? 'pr-20' : 'pr-12'}`}
             />
+            <FilterChevron />
             {(department || departmentText) && <button
               type="button" aria-label="Clear department"
               onClick={() => { chooseDepartment(''); setDepartmentOpen(true); departmentInput.current?.focus() }}
-              className="absolute inset-y-0 right-0 min-w-12 cursor-pointer rounded-r-md px-3 text-xl hover:bg-slate-100"
+              className="absolute inset-y-1 right-11 w-8 cursor-pointer rounded-md text-xl hover:bg-slate-100"
             >×</button>}
             {departmentOpen && <div className="absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
               <ul id="department-options" ref={departmentList} role="listbox" aria-label="Departments"
@@ -259,44 +268,53 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
 
         <div>
           <label htmlFor="search-status" className="mb-2 block font-semibold">Status</label>
-          <select
-            id="search-status"
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
-            className={filterControlClass}
-          >
-            <option value="">All Statuses</option>
-            <option value="OPEN">Open</option>
-            <option value="CLOSED">Closed</option>
-            <option value="CANCELLED">Cancelled</option>
-          </select>
+          <div className="relative">
+            <select
+              id="search-status"
+              value={status}
+              onChange={(event) => setStatus(event.target.value)}
+              className={`${filterControlClass} appearance-none pr-12`}
+            >
+              <option value="">All Statuses</option>
+              <option value="OPEN">Open</option>
+              <option value="CLOSED">Closed</option>
+              <option value="CANCELLED">Cancelled</option>
+            </select>
+            <FilterChevron />
+          </div>
         </div>
 
         <div>
           <label htmlFor="search-sort" className="mb-2 block font-semibold">Sort By</label>
-          <select
-            id="search-sort"
-            value={sort}
-            onChange={(event) => setSort(event.target.value)}
-            className={filterControlClass}
-          >
-            <option value="course">Course</option>
-            <option value="crn">CRN</option>
-            <option value="availability">Availability</option>
-          </select>
+          <div className="relative">
+            <select
+              id="search-sort"
+              value={sort}
+              onChange={(event) => setSort(event.target.value)}
+              className={`${filterControlClass} appearance-none pr-12`}
+            >
+              <option value="course">Course</option>
+              <option value="crn">CRN</option>
+              <option value="availability">Availability</option>
+            </select>
+            <FilterChevron />
+          </div>
         </div>
 
         <div>
           <label htmlFor="search-order" className="mb-2 block font-semibold">Order</label>
-          <select
-            id="search-order"
-            value={order}
-            onChange={(event) => setOrder(event.target.value)}
-            className={filterControlClass}
-          >
-            <option value="asc">Ascending</option>
-            <option value="desc">Descending</option>
-          </select>
+          <div className="relative">
+            <select
+              id="search-order"
+              value={order}
+              onChange={(event) => setOrder(event.target.value)}
+              className={`${filterControlClass} appearance-none pr-12`}
+            >
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
+            </select>
+            <FilterChevron />
+          </div>
         </div>
 
         <button
@@ -325,17 +343,16 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
 
       {results !== null && (
         <div className="mt-8">
-          <h2 className="mb-4 text-xl font-bold">
-            Search Results ({pagination.total})
-          </h2>
-
-          <CourseAvailabilityInfo />
+          <div className="mb-4 flex items-center gap-1">
+            <h2 className="text-xl font-bold">Search Results ({pagination.total})</h2>
+            <CourseAvailabilityInfo />
+          </div>
           <div className="overflow-x-auto rounded-md border border-slate-200">
             <table className="w-full min-w-[1000px] text-left">
               <thead className="bg-slate-50">
                 <tr>
-                  {['CRN', 'Course', 'Section', 'Capacity', 'Enrolled', 'Status', 'Last Seen', 'Watchlist'].map((heading) => (
-                    <th key={heading} className={`px-5 py-4 text-sm font-semibold whitespace-nowrap ${['Capacity', 'Enrolled'].includes(heading) ? 'text-right' : ''}`} >
+                  {['CRN', 'Course', 'Section', 'Capacity', 'Enrolled', 'Status', 'Last Checked', 'Watchlist'].map((heading) => (
+                    <th key={heading} className={`px-5 py-4 text-sm font-semibold whitespace-nowrap ${['Capacity', 'Enrolled'].includes(heading) ? 'text-right' : ['Status', 'Last Checked', 'Watchlist'].includes(heading) ? 'text-center' : 'text-left'}`} >
                       {heading}
                     </th>
                   ))}
@@ -353,14 +370,14 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
 
                   return (
                     <tr key={section.id} className="border-t border-slate-200 hover:bg-slate-50">
-                      <td className="px-5 py-3">{section.crn}</td>
-                      <td className="px-5 py-3 font-bold whitespace-nowrap">{section.course}</td>
-                      <td className="px-5 py-3">{section.section ?? '—'}</td>
+                      <td className="px-5 py-3 text-left">{section.crn}</td>
+                      <td className="px-5 py-3 text-left font-bold whitespace-nowrap">{section.course}</td>
+                      <td className="px-5 py-3 text-left">{section.section ?? '—'}</td>
                       <td className="px-5 py-3 text-right tabular-nums">{section.max ?? '—'}</td>
                       <td className="px-5 py-3 text-right tabular-nums">{section.now ?? '—'}</td>
 
-                      <td className="px-5 py-3">
-                        <span className={`inline-block min-w-[95px] rounded-md px-3 py-2 text-center font-semibold ${
+                      <td className="px-5 py-3 text-center">
+                        <span className={`inline-block min-w-[88px] rounded-md px-3 py-1.5 text-center text-sm font-semibold ${
                           section.status === 'OPEN'
                             ? 'bg-green-100 text-green-700'
                             : section.status === 'CLOSED'
@@ -371,14 +388,14 @@ export default function SearchCourses({ courses, onAdd, watchlistReady, pendingI
                         </span>
                       </td>
 
-                      <td className="px-5 py-3"><LastSeen timestamp={section.last_checked_at} /></td>
+                      <td className="px-5 py-3 text-center"><LastSeen timestamp={section.last_checked_at} /></td>
 
-                      <td className="px-5 py-3">
+                      <td className="px-5 py-3 text-center">
                         <button
                           type="button"
                           disabled={isWatched || !watchlistReady || pendingId !== null}
                           onClick={() => onAdd(section)}
-                          className={`flex items-center gap-2 rounded-md px-3 py-2 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-60 ${
+                          className={`mx-auto flex items-center justify-center gap-2 rounded-md px-3 py-2 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-60 ${
                             isWatched
                               ? 'cursor-not-allowed bg-slate-100 text-slate-500'
                               : 'cursor-pointer bg-red-100 text-[#D60000] hover:bg-red-200'

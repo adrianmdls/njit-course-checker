@@ -1,6 +1,6 @@
 
 import { useEffect, useRef, useState } from 'react'
-import { Bookmark, Search, Trash2 } from 'lucide-react'
+import { Bookmark, Search, Trash2, Bell } from 'lucide-react'
 import { useAuth } from '../auth'
 
 import SearchCourses from '../components/SearchCourses'
@@ -133,16 +133,31 @@ export default function Dashboard() {
 
         {activeTab === 'watchlist' ? (
           <section className="mt-6" aria-labelledby="watchlist-heading">
-            <h2 id="watchlist-heading" className="mb-4 text-xl font-bold">Watchlist ({courses.length})</h2>
-            <CourseAvailabilityInfo />
+            <div className="mb-4 flex items-center gap-1">
+              <h2 id="watchlist-heading" className="text-xl font-bold">Watchlist ({courses.length})</h2>
+              <CourseAvailabilityInfo />
+            </div>
+            <p id="notify-unavailable" className="sr-only">Email notifications are not yet available. This control is disabled.</p>
             <div className="overflow-x-auto rounded-md border border-slate-200">
-              <table className="w-full min-w-[1000px] border-collapse text-left text-[#0B1733]">
+              <table className="w-full min-w-[1280px] table-fixed border-collapse text-left text-[#0B1733]">
+                <colgroup>
+                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '13%' }} />
+                  <col style={{ width: '13%' }} />
+                  <col style={{ width: '9%' }} />
+                  <col style={{ width: '9%' }} />
+                  <col style={{ width: '9%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '14%' }} />
+                  <col style={{ width: '9%' }} />
+                  <col style={{ width: '6%' }} />
+                </colgroup>
                 <thead className="bg-slate-50">
                   <tr>
-                    {['CRN', 'Course', 'Term', 'Section', 'Capacity', 'Enrolled', 'Status', 'Last Seen', 'Remove'].map((heading) => (
+                    {['CRN', 'Course', 'Term', 'Section', 'Capacity', 'Enrolled', 'Status', 'Last Checked', 'Notify', 'Remove'].map((heading) => (
                       <th
                         key={heading}
-                        className={`px-5 py-4 text-sm font-semibold whitespace-nowrap ${['Capacity', 'Enrolled'].includes(heading) ? 'text-right' : ''}`}
+                        className={`${heading === 'Remove' ? 'px-2' : 'px-3'} py-4 text-sm font-semibold whitespace-nowrap ${['Capacity', 'Enrolled'].includes(heading) ? 'text-right' : ['Status', 'Last Checked', 'Notify', 'Remove'].includes(heading) ? 'text-center' : 'text-left'}`}
                       >
                         {heading}
                       </th>
@@ -158,20 +173,20 @@ export default function Dashboard() {
 
                     return (
                       <tr key={course.section_id} className="border-t border-slate-200 hover:bg-slate-50">
-                        <td className="px-5 py-3">{course.crn}</td>
+                        <td className="px-3 py-3 text-left">{course.crn}</td>
 
-                        <td className="px-5 py-3 font-bold whitespace-nowrap">
+                        <td className="px-3 py-3 text-left font-bold break-words">
                           <span title={course.title ?? undefined}>{course.course}</span>
                         </td>
 
-                        <td className="px-5 py-3 whitespace-nowrap">{termLabel(course.term)}</td>
-                        <td className="px-5 py-3">{course.section ?? '—'}</td>
-                        <td className="px-5 py-3 text-right tabular-nums">{unavailable ? '—' : course.max ?? '—'}</td>
-                        <td className="px-5 py-3 text-right tabular-nums">{unavailable ? '—' : course.now ?? '—'}</td>
+                        <td className="px-3 py-3 text-left whitespace-nowrap">{termLabel(course.term)}</td>
+                        <td className="px-3 py-3 text-left">{course.section ?? '—'}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{unavailable ? '—' : course.max ?? '—'}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{unavailable ? '—' : course.now ?? '—'}</td>
 
-                        <td className="px-5 py-3">
+                        <td className="px-3 py-3 text-center">
                           <span
-                            className={`inline-block min-w-[95px] rounded-md px-3 py-2 text-center font-semibold ${
+                            className={`inline-block min-w-[88px] rounded-md px-3 py-1.5 text-center text-sm font-semibold ${
                               unavailable ? 'bg-slate-100 text-slate-600' : course.status === 'OPEN'
                                 ? 'bg-green-100 text-green-700'
                                 : course.status === 'CLOSED' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'
@@ -182,18 +197,30 @@ export default function Dashboard() {
                           {unavailable && <p className="mt-1 text-xs text-slate-500">Previously marked unavailable; awaiting a new Banner observation.</p>}
                         </td>
 
-                        <td className="px-5 py-3">
+                        <td className="px-3 py-3 text-center">
                           <LastSeen timestamp={course.last_checked_at} />
                         </td>
 
-                        <td className="px-5 py-3">
+                        <td className="px-3 py-3 text-center">
+                          <span tabIndex={0} role="group" aria-label="Email notifications coming soon"
+                            aria-describedby="notify-unavailable" title="Email notifications are not yet available."
+                            className="inline-flex rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700">
+                            <button type="button" disabled aria-label="Email notifications coming soon"
+                              aria-describedby="notify-unavailable"
+                              className="pointer-events-none flex size-10 cursor-not-allowed items-center justify-center rounded-md bg-slate-100 text-slate-400">
+                              <Bell size={18} aria-hidden="true" />
+                            </button>
+                          </span>
+                        </td>
+
+                        <td className="px-2 py-3 text-center">
                           <button
                             type="button"
                             onClick={() => changeWatchlist(course, true)}
                             disabled={loading || !loaded || pendingId !== null}
                             aria-label={`Remove ${course.course} section ${course.section ?? "unknown"} (${course.term}) from watchlist`}
                             title={`Remove ${course.course} section ${course.section ?? "unknown"} from watchlist`}
-                            className="flex min-h-10 cursor-pointer items-center justify-center rounded-md bg-red-100 px-3 py-2 text-red-600 hover:bg-red-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="mx-auto flex min-h-10 cursor-pointer items-center justify-center rounded-md bg-red-50 px-3 py-2 text-red-700 hover:bg-red-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {pendingId === course.section_id ? 'Removing…' : <Trash2 size={18} />}
                           </button>
