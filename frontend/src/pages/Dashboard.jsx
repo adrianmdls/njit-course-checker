@@ -173,7 +173,7 @@ export default function Dashboard() {
                         >
                           {statusLabel}
                         </span>
-                        {unavailable && <p className="mt-1 text-xs text-slate-500">Not present in the latest successful nonempty Banner snapshot.</p>}
+                        {unavailable && <p className="mt-1 text-xs text-slate-500">Previously marked unavailable; awaiting a new Banner observation.</p>}
                       </td>
 
                       <td className="px-5 py-3 whitespace-nowrap">

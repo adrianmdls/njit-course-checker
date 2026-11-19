@@ -154,12 +154,19 @@ Example response:
 
 Counts refer to unique supplied courses/sections. New or reactivated sections do not count as status changes. For already active sections, any different stored status (including NULL) counts once. Repeated identical requests report zero status changes, create no duplicate records, and refresh observed sections' `last_checked_at` and department `last_synced_at`. Courses upsert by `(subject, course_number)` and sections by `(term, crn)`. Existing section IDs and Watchlist references survive; watched and unwatched sections receive the same updates, including legacy rows with a NULL course link. A CRN already owned by another subject in that term returns `409`.
 
-Validated complete nonempty snapshots mark omitted sections inactive within the
-same transaction, preserving their stored Banner status and last-seen fields.
-Returning sections reactivate. Empty snapshots preserve all section activity until
-real Banner empty-result semantics are verified. Search/counts/catalog options
+Accepted nonempty responses update and reactivate only explicitly observed sections.
+Omitted rows are preserved exactly, including IDs, activity, status, enrollment,
+course links, timestamps and watches. Structural validation cannot establish Banner
+completeness, so absence never causes deactivation. Historical statuses can become
+stale; `last_checked_at` is the section's last observation, and department
+`last_synced_at` records accepted work rather than a proven complete inventory.
+Empty snapshots retain their existing nondestructive behavior. Search/counts/catalog options
 exclude inactive sections; watchlists include them and both APIs expose boolean
 `is_active`. Inactive watched sections still contribute monitoring targets.
+Existing inactive rows remain inactive until explicitly observed again. This
+policy adds no schema, generation tracking or completeness flag. Future notification
+eligibility still requires independently established completeness; aggregate counts
+and department timestamps do not provide that evidence.
 See [activity behavior and the required existing-volume migration](../docs/section-activity.md).
 Obsolete experimental generation columns have a separate, optional
 [forward-only cleanup migration](../docs/snapshot-generation-cleanup.md).

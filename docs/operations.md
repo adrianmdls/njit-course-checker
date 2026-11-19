@@ -76,6 +76,14 @@ data exists, the form explains this and disables search. Reopen the search tab
 after a synchronization to refresh its options. Existing rows remain searchable
 even when their department/term is no longer actively monitored.
 
+Synchronization preserves omitted sections exactly. A structurally valid Banner
+response can still be incomplete, so omission no longer marks a section inactive.
+Only explicit observations update/reactivate sections and their last-seen times.
+Historical OPEN/CLOSED/CANCELLED values may be stale; department completion is not
+proof that every stored section was observed. Existing inactive rows stay inactive
+until observed again. See [section preservation](section-activity.md). No schema
+change or automatic repair of historical activity flags accompanies this safeguard.
+
 ## Banner term codes
 
 The first four digits identify the year:

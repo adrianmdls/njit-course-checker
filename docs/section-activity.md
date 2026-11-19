@@ -1,24 +1,25 @@
-# Section activity (F2)
+# Section activity and conservative preservation (F1)
 
-`Sections.is_active` records presence in the latest accepted **nonempty** complete
-department/term snapshot. It is separate from the last explicit Banner status.
-Disappearance is not an official cancellation.
+`Sections.is_active` is retained activity state, separate from the last explicit
+Banner status. Explicit observations set it true. Absence from an accepted
+response no longer changes it: structural validity does not prove upstream
+completeness. Historical activity and status may become stale.
 
 ## Ingestion and presentation
 
-- A nonempty snapshot upserts observed sections as active and marks omitted CRNs
-  inactive for that exact subject/term. All writes and DepartmentSyncs completion
-  share the existing transaction and department lock.
-- Omission changes only `is_active`: IDs, watches, stored status, enrollment,
-  course links, and last observation timestamps survive.
-- Returning sections keep their IDs, become active, and receive current observed
-  fields/timestamps. Their reactivation does not increment `status_changes`.
+- A nonempty response upserts only observed sections as active. All writes and
+  DepartmentSyncs completion share the existing transaction and department lock.
+- Omission preserves every section field exactly: IDs/CRNs, activity, status,
+  enrollment, course links and last-observed timestamps. Watch relationships also
+  remain unchanged. Both omitted active and inactive rows retain their flags.
+- Previously inactive observed sections keep their IDs, become active, and receive
+  current observed fields/timestamps. Their reactivation does not increment `status_changes`.
   New sections also establish a baseline. Changes on already active sections
   retain the existing status-change counting behavior.
 - Successful empty snapshots preserve **all** existing section fields/activity,
   including already inactive rows. They still record department completion.
-  This exception remains until real Banner empty-response semantics are verified.
-- Failed fetching/parsing/validation submits no reconciled data. SQL failures
+  Real Banner empty-response semantics remain unverified.
+- Failed fetching/parsing/validation submits no accepted observations. SQL failures
   roll back activity, observed values, and department completion together.
 - Search, result counts, and catalog options include only active sections.
   Both search and watchlist APIs return a JSON boolean `is_active`.
@@ -31,6 +32,15 @@ No email delivery is implemented. A future CLOSED-to-OPEN event must require an
 already active prior observation with explicit CLOSED status followed by explicit
 OPEN status. Disappearance/reappearance alone is not such an event; aggregate
 `status_changes` is not a substitute for per-section notification eligibility.
+
+The same explicit-observation requirement applies to OPEN-to-CLOSED. Neither
+direction is notification-ready: this safeguard does not distinguish complete
+from incomplete responses. Do not use department completion or aggregate counts
+as completeness evidence. `DepartmentSyncs.last_synced_at` still records accepted
+work, including empty responses; it does not refresh omitted sections' timestamps.
+Existing false/inactive historical flags are not repaired speculatively. Only a
+new explicit observation reactivates such a section. No new schema or migration,
+generation tracking, or locally asserted completeness flag is introduced.
 
 ## Existing-volume migration (manual; not applied by this change)
 
@@ -63,7 +73,7 @@ OPEN status. Disappearance/reappearance alone is not such an event; aggregate
 
 3. Verify the column/default and row/watch counts. Existing rows initially remain
    active; historical inactivity is not inferred during migration. Normal future
-   nonempty synchronizations establish activity without a forced Banner import.
+   explicit observations establish activity without a forced Banner import.
 
 Fresh databases receive the column through `database/init/01-schema.sql` and do
 not need this migration. Existing volumes do not rerun initialization automatically.
@@ -81,6 +91,13 @@ column discards activity information and requires a separate reviewed operation.
 
 ## Verification
 
+Current F1 regressions include structurally valid responses omitting whole rows,
+course blocks, and response-array items. The Python parser tests show why those
+responses pass structural checks. Disposable pipeline tests then assert exact
+omitted-row/watch preservation, historical timestamps and mixed activity states,
+observed updates/reactivation, stable identities and idempotent retries. Existing
+validation, locks, empty-response, rollback and migration regressions remain.
+
 - `node --test backend/test/section-activity.test.cjs` runs socket-free handler/SQL
   checks. They verify control flow and query construction, not real database
   transactions or constraints.
@@ -93,6 +110,22 @@ column discards activity information and requires a separate reviewed operation.
   hidden current counts, and removal using the existing component harness.
 - Run the full backend, Python, lint/build and disposable pipeline/browser suites
   where their environment requirements are available.
+
+F1 verification on November 18, 2026: **73 Python unit tests, 31 backend tests
+against a fresh networkless tmpfs MariaDB server, and 26 frontend component tests
+passed**. The full disposable pipeline passed **18 tests**, including both Chrome
+scenarios. The strengthened partial-response regression also passed separately
+with all six combinations of omission shape and prior active/inactive state.
+Frontend lint, production image builds, Python/JavaScript syntax, fixture JSON
+and whitespace checks passed. All test-owned database containers/stacks were
+removed. No application database, application-container restart, live Banner
+request, schema/migration edit, generation tracking or notification implementation
+was involved. The untracked November 18 audit report was preserved unchanged.
+
+### Historical F2 verification (before the F1 preservation safeguard)
+
+The results and omission/deactivation descriptions below record the earlier F2
+implementation; the current F1 policy above supersedes that behavior.
 
 Initial verification on November 18, 2026: six socket-free backend tests passed; the new
 MariaDB case skipped. All ten frontend component tests and 65 Python tests passed;
@@ -145,10 +178,9 @@ application container was changed, and no live Banner request was made.
 
 The parser rejects recognized malformed/truncated responses, but structural
 validity does not establish upstream completeness. A syntactically valid
-nonempty response that silently omits a course, page, or section can pass and
-incorrectly deactivate absent records. This change does not introduce a new
-proof-of-completeness mechanism. Verify the real response contract and pagination
-behavior before relying on absence as authoritative. A later complete nonempty
-snapshot reactivates returning rows without losing IDs/watches or counting their
-reappearance as a transition. Empty responses deliberately cannot clear this or
-other stale activity states until their semantics are verified.
+nonempty response that silently omits a course, page, or section can still pass.
+F1 prevents absence-driven deactivation by preserving missing rows. It does not
+prove completeness or detect legitimate removals. An omitted active section can
+remain searchable with an old OPEN/CLOSED/CANCELLED status; consult its actual
+last-observed time. Verify the real response contract and pagination before
+restoring absence-based reconciliation or enabling snapshot-derived notifications.

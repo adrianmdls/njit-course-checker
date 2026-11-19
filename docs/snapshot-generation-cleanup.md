@@ -2,9 +2,10 @@
 
 The repository audit found no production reader or writer of
 `Sections.snapshot_generation` or `DepartmentSyncs.snapshot_generation` in
-Python, Express, React, or SQL. Ingestion uses transactions and department locks;
-F2 reconciles omitted sections using `is_active` and supplied CRNs. Search,
-watchlists, monitoring targets, and transition counts do not depend on generations.
+Python, Express, React, or SQL. Ingestion uses transactions and department locks.
+The F1 safeguard preserves omitted sections and activates only observed CRNs; it
+does not require generations. Search, watchlists, monitoring targets, and transition
+counts do not depend on generations.
 The fresh initialization schema already excludes both columns. No historical
 migration introduces them; existing migration files remain unchanged. Older audit
 and phase notes are retained as historical records.

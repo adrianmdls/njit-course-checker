@@ -16,7 +16,11 @@ same session cookie as login. Search never fetches Banner or starts a sync.
 Unsynchronized department/term combinations return no results. Search and catalog
 options exclude inactive sections; existing watches retain them as Unavailable.
 See [section activity and migration instructions](docs/section-activity.md) before
-deploying against an existing database volume. Empty snapshots preserve activity.
+deploying against an existing database volume. Accepted responses update only
+observed sections. Omitted sections, including their activity/status and last-seen
+timestamps, remain unchanged because Banner completeness is unverified. Historical
+statuses can therefore become stale; absence is not evidence of removal or closure.
+Empty snapshots also preserve activity. No new migration is needed for this policy.
 
 Watchlists persist in MariaDB for the authenticated user. Search results show
 whether each database section is already watched; Add and Remove use the session-

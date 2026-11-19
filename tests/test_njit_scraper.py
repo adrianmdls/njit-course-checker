@@ -26,6 +26,21 @@ class ParserTests(unittest.TestCase):
     def test_explicit_empty_list(self):
         self.assertEqual(parse_all_sections(FIXTURES['empty']), [])
 
+    def test_structurally_valid_omissions_are_observations_not_completeness_proof(self):
+        for name in ('preservation_full', 'preservation_full_items'):
+            self.assertEqual({row['crn'] for row in parse_all_sections(FIXTURES[name])},
+                             {'01234', '01235', '02234'})
+        for name, expected in (
+            ('preservation_missing_row', {'01234', '02234'}),
+            ('preservation_missing_course', {'01234', '01235'}),
+            ('preservation_missing_item', {'01234', '01235'}),
+        ):
+            with self.subTest(fixture=name):
+                rows = parse_all_sections(FIXTURES[name])
+                self.assertEqual({row['crn'] for row in rows}, expected)
+                observed = next(row for row in rows if row['crn'] == '01234')
+                self.assertEqual((observed['status'], observed['current_enrollment']), ('CLOSED', 30))
+
     def test_malformed_data_never_becomes_empty_or_partial_success(self):
         for name in ('missing_table', 'partial', 'truncated', 'unexpected_empty_markup',
                      'invalid_status', 'invalid_crn', 'invalid_enrollment',

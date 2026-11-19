@@ -91,14 +91,9 @@ async function synchronize(pool, snapshot) {
       [subject, term, section.crn, section.section_number, section.capacity, section.enrolled,
         section.status, courseIds.get(section.courseNumber)]);
     }
-    // Only complete nonempty snapshots reconcile absence. Empty-result semantics
-    // are not yet verified against Banner, so [] preserves all section activity.
-    if (sections.length) {
-      await connection.execute(`UPDATE Sections SET is_active = FALSE
-        WHERE subject = ? AND term = ? AND is_active = TRUE
-          AND crn NOT IN (${sections.map(() => '?').join(',')})`,
-      [subject, term, ...sections.map(section => section.crn)]);
-    }
+    // Structural validation cannot prove Banner returned every section. Preserve
+    // omitted rows exactly; only explicit observations update/reactivate sections.
+    // Department completion records accepted work, not upstream completeness.
     await connection.execute(`INSERT INTO DepartmentSyncs (subject, term, last_synced_at)
       VALUES (?, ?, CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE last_synced_at = CURRENT_TIMESTAMP`, [subject, term]);
     await connection.commit();

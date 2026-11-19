@@ -113,16 +113,14 @@ test('every section title is validated even if another row would supply the cata
   }
 });
 
-test('nonempty reconciliation scopes/deduplicates CRNs and commits after omission update', async () => {
+test('nonempty submissions update only deduplicated observed CRNs before committing', async () => {
   const pool = recordingPool();
   const result = await ingest(pool, [section(), section(), section('01235')]);
   assert.equal(result.body.status_changes, 2);
-  const omission = pool.calls.find(call => call.sql.startsWith('UPDATE Sections'));
-  assert.match(omission.sql, /SET is_active = FALSE/);
-  assert.match(omission.sql, /WHERE subject = \? AND term = \?/);
-  assert.match(omission.sql, /crn NOT IN \(\?,\?\)/);
-  assert.deepEqual(omission.params, ['CS', '202710', '01234', '01235']);
-  assert.ok(pool.calls.indexOf(omission) < pool.calls.findIndex(call => call.sql.includes('INSERT INTO DepartmentSyncs')));
+  assert.ok(!pool.calls.some(call => call.sql.startsWith('UPDATE Sections')));
+  const upserts = pool.calls.filter(call => call.sql.includes('INSERT INTO Sections'));
+  assert.deepEqual(upserts.map(call => call.params[2]), ['01234', '01235']);
+  assert.ok(pool.calls.indexOf(upserts.at(-1)) < pool.calls.findIndex(call => call.sql.includes('INSERT INTO DepartmentSyncs')));
   assert.equal(pool.calls.at(-3).sql, 'COMMIT');
   for (const call of pool.calls.filter(call => call.sql.includes('INSERT INTO Sections'))) {
     assert.match(call.sql, /is_active = TRUE/);
@@ -145,11 +143,12 @@ test('empty snapshots do not write any section fields or activity', async () => 
   assert.ok(pool.calls.some(call => call.sql.includes('INSERT INTO DepartmentSyncs')));
 });
 
-test('failure after omission update rolls back before releasing the department lock', async () => {
+test('failure after observed upserts rolls back before releasing the department lock', async () => {
   const pool = recordingPool(undefined, 'INSERT INTO DepartmentSyncs');
   await assert.rejects(ingest(pool, [{ ...section('09000'), title: 'Other topic' }, section()]), /injected/);
   assert.deepEqual(pool.calls.find(call => call.sql.includes('INSERT INTO Courses')).params, ['CS', '100', 'Intro']);
-  assert.ok(pool.calls.some(call => call.sql.startsWith('UPDATE Sections')));
+  assert.ok(pool.calls.some(call => call.sql.includes('INSERT INTO Sections')));
+  assert.ok(!pool.calls.some(call => call.sql.startsWith('UPDATE Sections')));
   assert.ok(!pool.calls.some(call => call.sql === 'COMMIT'));
   assert.equal(pool.calls.at(-3).sql, 'ROLLBACK');
   assert.match(pool.calls.at(-2).sql, /RELEASE_LOCK/);
@@ -242,7 +241,7 @@ test('MariaDB generation removal preserves rows and indexes with both, one, or n
     } finally { await admin.end(); }
   });
 
-test('MariaDB migration, omission, reactivation, rollback and historical watch/search behavior',
+test('MariaDB migration, omission preservation, reactivation, rollback and historical watch/search behavior',
   { skip: !process.env.TEST_DB_PORT && 'Set TEST_DB_PORT to a disposable MariaDB server only' }, async () => {
     const database = `activity_test_${randomBytes(6).toString('hex')}`;
     const config = { host: process.env.TEST_DB_HOST || '127.0.0.1', port: Number(process.env.TEST_DB_PORT),
@@ -277,6 +276,8 @@ test('MariaDB migration, omission, reactivation, rollback and historical watch/s
       assert.deepEqual(migrated.map(({ is_active, ...row }) => row), before);
       assert.ok(migrated.every(row => row.is_active === 1));
       await pool.query(await readFile(`${__dirname}/../../database/migrations/05-remove-snapshot-generation.sql`, 'utf8'));
+      // Preserve a historical inactive row as well as active omitted rows.
+      await pool.query('UPDATE Sections SET is_active=FALSE WHERE id=2');
       const activeBaseline = await rows();
       const watches = (await pool.query('SELECT * FROM Watchlists ORDER BY id'))[0];
       const count = async sections => {
@@ -286,15 +287,15 @@ test('MariaDB migration, omission, reactivation, rollback and historical watch/s
       };
       assert.equal(await count([section()]), 0);
       const omitted = await rows();
-      assert.deepEqual(omitted.map(row => row.is_active), [1, 0, 0, 1, 1]);
-      for (const index of [1, 2]) assert.deepEqual(omitted[index], { ...activeBaseline[index], is_active: 0 });
+      assert.deepEqual(omitted.map(row => row.is_active), [1, 0, 1, 1, 1]);
+      assert.deepEqual(omitted.slice(1), activeBaseline.slice(1), 'every omitted section field is preserved');
       assert.deepEqual((await pool.query('SELECT * FROM Watchlists ORDER BY id'))[0], watches);
       const courses = createCourses(pool, auth);
-      const search = await invoke(courses, 'get', '/', { query: { term: '202710', subject: 'CS', limit: '1' } });
-      assert.equal(search.body.pagination.total, 1);
+      const search = await invoke(courses, 'get', '/', { query: { term: '202710', subject: 'CS', sort: 'crn', limit: '1' } });
+      assert.equal(search.body.pagination.total, 2);
       assert.deepEqual(search.body.sections.map(row => row.id), [1]);
       assert.equal(search.body.sections[0].is_active, true);
-      assert.equal((await invoke(courses, 'get', '/', { query: { term: '202710', subject: 'CS', offset: '1' } })).body.sections.length, 0);
+      assert.deepEqual((await invoke(courses, 'get', '/', { query: { term: '202710', subject: 'CS', sort: 'crn', offset: '1' } })).body.sections.map(row => row.id), [3]);
       const watched = (await invoke(createWatchlist(pool, auth), 'get', '/')).body.sections;
       assert.deepEqual(watched.map(row => row.section_id).sort(), [1, 2, 3]);
       assert.equal(watched.find(row => row.section_id === 2).is_active, false);

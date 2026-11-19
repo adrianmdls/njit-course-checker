@@ -151,6 +151,9 @@ class PipelineTests(unittest.TestCase):
 
     def test_synchronized_course_search_through_proxy(self):
         self.seed_watchlists()
+        # These legacy watches belong to observed fixture CRNs. Pagination must
+        # not rely on deactivating unrelated, omitted sections to reach 53 rows.
+        self.sql("UPDATE Sections SET crn = CASE crn WHEN '12345' THEN '12000' ELSE '12001' END WHERE subject = 'CS'")
         synced = self.probe("poll", section_count=53, mixed=True, title_variants=True, vary_enrollment=True)
         self.assertEqual(synced["errors"], 0, synced)
         self.assertEqual(synced["banner_calls"], [["CS", "202710"], ["IT", "202795"]])
@@ -297,7 +300,7 @@ class PipelineTests(unittest.TestCase):
                          {"courses": 0, "sections": 0, "status_changes": 0})
         self.assertEqual(self.snapshot()["Sections"], before["Sections"])
 
-    def test_section_activity_lifecycle_through_python_api_search_and_watchlist(self):
+    def test_section_preservation_through_python_api_search_and_watchlist(self):
         # CS fixtures use stable CRNs 12000/12001 for section_count=2. Mixed
         # status makes the returning section CLOSED while the survivor stays OPEN.
         self.assertEqual(self.probe("submit", subject="CS", term="202710", section_count=2, mixed=True, title_variants=True),
@@ -323,25 +326,25 @@ class PipelineTests(unittest.TestCase):
                          {"courses": 1, "sections": 1, "status_changes": 0})
         after = self.snapshot()
         self.assertEqual(next(row for row in after["Sections"] if row["id"] == ids["12001"]),
-                         {**missing, "is_active": 0}, "omission changes only activity")
+                         missing, "omission preserves every section field")
         self.assertEqual(after["Watchlists"], before["Watchlists"])
         visible = search()
-        self.assertEqual(visible["pagination"]["total"], 1)
-        self.assertEqual([row["id"] for row in visible["sections"]], [ids["12000"]])
+        self.assertEqual(visible["pagination"]["total"], 2)
+        self.assertEqual({row["id"] for row in visible["sections"]}, set(ids.values()))
         watched = self.probe("watchlist")
         self.assertEqual(watched["status"], 200)
         self.assertEqual(len(watched["body"]["sections"]), 1)
         retained = watched["body"]["sections"][0]
         self.assertEqual(retained["section_id"], ids["12001"])
-        self.assertIs(retained["is_active"], False)
+        self.assertIs(retained["is_active"], True)
         self.assertEqual(retained["status"], "CLOSED")
         self.assertEqual(retained["last_checked_at"], missing["last_checked_at"])
         self.assertIn({"subject": "CS", "term": "202710"}, self.probe("targets")["targets"],
-                      "an inactive-only watch must remain monitored")
+                      "an omitted watched section must remain monitored")
 
         self.assertEqual(self.probe("submit", subject="CS", term="202710", section_count=2, title_variants=True),
-                         {"courses": 1, "sections": 2, "status_changes": 0},
-                         "CLOSED to OPEN on reappearance establishes a baseline")
+                         {"courses": 1, "sections": 2, "status_changes": 1},
+                         "a preserved active section still compares its explicit observations")
         restored = search()
         self.assertEqual({row["crn"]: row["id"] for row in restored["sections"]}, ids)
         self.assertTrue(all(row["is_active"] is True for row in restored["sections"]))
@@ -354,6 +357,50 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(self.probe("submit", subject="CS", term="202710", section_count=2, status=status),
                              {"courses": 1, "sections": 2, "status_changes": 2},
                              "continuously active status transitions still count")
+
+    def test_valid_partial_responses_preserve_omitted_rows_courses_and_items(self):
+        for fixture, omitted_crn, omitted_active in (
+            ("preservation_missing_row", "01235", 1),
+            ("preservation_missing_row", "01235", 0),
+            ("preservation_missing_course", "02234", 1),
+            ("preservation_missing_course", "02234", 0),
+            ("preservation_missing_item", "02234", 1),
+            ("preservation_missing_item", "02234", 0),
+        ):
+            with self.subTest(fixture=fixture, omitted_active=omitted_active):
+                self.setUp()  # Only this test-owned stack; isolate each response shape.
+                full = "preservation_full_items" if fixture.endswith("item") else "preservation_full"
+                self.assertEqual(self.probe("submit", subject="DS", term="202710", banner_fixture=full),
+                                 {"courses": 2, "sections": 3, "status_changes": 0})
+                self.sql("INSERT INTO Users(username,email,password_hash) VALUES(?,?,?)",
+                         ["preservation_watcher", "preservation@example.invalid", "unused"])
+                self.sql("INSERT INTO Watchlists(user_id,section_id) SELECT u.id,s.id FROM Users u CROSS JOIN Sections s")
+                # Exercise omission of both historical inactive and active sections.
+                self.sql("UPDATE Sections SET is_active=FALSE WHERE crn=?", ["01235"])
+                self.sql("UPDATE Sections SET is_active=? WHERE crn=?", [omitted_active, omitted_crn])
+                self.age_timestamps()
+                before = self.snapshot()
+                result = self.probe("submit", subject="DS", term="202710", banner_fixture=fixture)
+                self.assertEqual(result["sections"], 2)
+                self.assertEqual(result["status_changes"], 1)
+                after = self.snapshot()
+                by_crn = lambda rows: {row["crn"]: row for row in rows}
+                old, new = by_crn(before["Sections"]), by_crn(after["Sections"])
+                self.assertEqual(new[omitted_crn], old[omitted_crn], "all omitted fields must remain byte-for-byte equivalent")
+                self.assertEqual(after["Watchlists"], before["Watchlists"])
+                self.assertEqual({crn: row["id"] for crn, row in new.items()},
+                                 {crn: row["id"] for crn, row in old.items()})
+                self.assertEqual((new["01234"]["status"], new["01234"]["enrolled"], new["01234"]["is_active"]),
+                                 ("CLOSED", 30, 1))
+                self.assertNotEqual(new["01234"]["last_checked_at"], old["01234"]["last_checked_at"])
+                self.assertNotEqual(after["DepartmentSyncs"][0]["last_synced_at"], before["DepartmentSyncs"][0]["last_synced_at"])
+                if omitted_crn != "01235":
+                    self.assertEqual(new["01235"]["is_active"], 1, "explicitly observed inactive sections reactivate")
+                repeated = self.probe("submit", subject="DS", term="202710", banner_fixture=fixture)
+                self.assertEqual(repeated["status_changes"], 0)
+                retried = self.snapshot()
+                self.assertEqual(by_crn(retried["Sections"])[omitted_crn], old[omitted_crn])
+                self.assertEqual(retried["Watchlists"], before["Watchlists"])
 
     def test_section_activity_schema_and_existing_mariadb_migration_regressions(self):
         columns = self.sql("SHOW COLUMNS FROM Sections LIKE 'is_active'")
@@ -409,7 +456,7 @@ class PipelineTests(unittest.TestCase):
                  "FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='fixture failure'")
         try:
             # A new CS CRN omits the two stored ones. Failure at department
-            # completion must roll back their deactivation as well as all upserts.
+            # completion must roll back observed upserts while omitted rows stay intact.
             result = self.probe("poll", status="CLOSED", section_count=1)
             self.assertEqual(result["errors"], 2, result)
             self.assertTrue(all("HTTP 503" in row for row in result["results"]), result)
@@ -422,8 +469,8 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.probe("poll", status="CLOSED", section_count=1)["errors"], 0)
         cs = self.sql("SELECT crn,is_active FROM Sections WHERE subject=? AND term=? ORDER BY crn",
                       ["CS", "202710"])
-        self.assertEqual(cs, [{"crn": "12000", "is_active": 1}, {"crn": "12345", "is_active": 0},
-                              {"crn": "12346", "is_active": 0}])
+        self.assertEqual(cs, [{"crn": "12000", "is_active": 1}, {"crn": "12345", "is_active": 1},
+                              {"crn": "12346", "is_active": 1}])
 
     def test_actual_manual_checker_is_read_only(self):
         self.seed_watchlists()
