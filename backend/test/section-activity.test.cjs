@@ -188,6 +188,60 @@ test('search filters activity in count/page/options; watchlist and targets keep 
   assert.ok(!calls.at(-1).sql.includes('is_active'));
 });
 
+test('MariaDB generation removal preserves rows and indexes with both, one, or neither column',
+  { skip: !process.env.TEST_DB_PORT && 'Set TEST_DB_PORT to a disposable MariaDB server only' }, async () => {
+    const config = { host: process.env.TEST_DB_HOST || '127.0.0.1', port: Number(process.env.TEST_DB_PORT),
+      user: 'root', password: process.env.TEST_DB_PASSWORD || 'test-only-password' };
+    const admin = await mysql.createConnection(config);
+    try {
+      for (const legacyTables of [[], ['Sections'], ['DepartmentSyncs'], ['Sections', 'DepartmentSyncs']]) {
+        const database = `generation_removal_${randomBytes(6).toString('hex')}`;
+        await admin.query(`CREATE DATABASE ${database}`);
+        const pool = mysql.createPool({ ...config, database, multipleStatements: true });
+        try {
+          const schema = await readFile(`${__dirname}/../../database/init/01-schema.sql`, 'utf8');
+          await pool.query(schema.replace('USE njit_course_checker;', `USE ${database};`));
+          for (const table of legacyTables) {
+            await pool.query(`ALTER TABLE ${table} ADD snapshot_generation BIGINT UNSIGNED NOT NULL DEFAULT 0`);
+          }
+          await pool.query(`INSERT INTO Courses(id,subject,course_number,title) VALUES(1,'CS','100','Intro');
+            INSERT INTO Users(id,username,email,password_hash) VALUES(1,'watcher','watcher@example.invalid','unused');
+            INSERT INTO Sections(id,subject,term,crn,course_id,status,is_active,last_checked_at) VALUES
+              (1,'CS','202710','01234',1,'OPEN',TRUE,'2000-01-01'),
+              (2,'CS','202710','01235',1,'CLOSED',FALSE,'2000-01-02');
+            INSERT INTO Watchlists(user_id,section_id) VALUES(1,1),(1,2);
+            INSERT INTO DepartmentSyncs(subject,term,last_synced_at) VALUES('CS','202710','2000-01-03')`);
+          // Values need not be zero: removal must preserve every other field.
+          for (const table of legacyTables) await pool.query(`UPDATE ${table} SET snapshot_generation=7`);
+          const capture = async () => {
+            const data = {};
+            for (const table of ['Users', 'Courses', 'Sections', 'Watchlists', 'DepartmentSyncs']) {
+              const [rows] = await pool.query(`SELECT * FROM ${table} ORDER BY ${table === 'DepartmentSyncs' ? 'subject,term' : 'id'}`);
+              data[table] = rows.map(({ snapshot_generation, ...row }) => row);
+              data[`${table}Indexes`] = (await pool.query(`SHOW INDEX FROM ${table}`))[0]
+                .map(({ Cardinality, ...index }) => index);
+            }
+            return data;
+          };
+          const before = await capture();
+          const migration = await readFile(`${__dirname}/../../database/migrations/05-remove-snapshot-generation.sql`, 'utf8');
+          for (let run = 0; run < 2; run++) {
+            await pool.query(migration);
+            assert.deepEqual(await capture(), before);
+            for (const table of ['Sections', 'DepartmentSyncs']) {
+              assert.deepEqual((await pool.query(`SHOW COLUMNS FROM ${table} LIKE 'snapshot_generation'`))[0], []);
+            }
+          }
+          await assert.rejects(pool.query('INSERT INTO Watchlists(user_id,section_id) VALUES(1,999)'),
+            { code: 'ER_NO_REFERENCED_ROW_2' }, 'watchlist foreign keys survive migration');
+        } finally {
+          await pool.end();
+          await admin.query(`DROP DATABASE ${database}`);
+        }
+      }
+    } finally { await admin.end(); }
+  });
+
 test('MariaDB migration, omission, reactivation, rollback and historical watch/search behavior',
   { skip: !process.env.TEST_DB_PORT && 'Set TEST_DB_PORT to a disposable MariaDB server only' }, async () => {
     const database = `activity_test_${randomBytes(6).toString('hex')}`;
@@ -199,8 +253,8 @@ test('MariaDB migration, omission, reactivation, rollback and historical watch/s
     try {
       await admin.query(`CREATE DATABASE ${database}`); owned = true;
       const schema = await readFile(`${__dirname}/../../database/init/01-schema.sql`, 'utf8');
-      // Reproduce an existing volume without the new column, including optional
-      // experimental columns. Only this random schema is ever migrated.
+      // Reproduce a legacy schema and migrate it before exercising F2.
+      // Only this random schema is ever migrated.
       await pool.query(schema.replace('USE njit_course_checker;', `USE ${database};`)
         .replace('    is_active BOOLEAN NOT NULL DEFAULT TRUE,\n', ''));
       await pool.query(`ALTER TABLE Sections ADD snapshot_generation BIGINT UNSIGNED NOT NULL DEFAULT 7;
@@ -222,6 +276,8 @@ test('MariaDB migration, omission, reactivation, rollback and historical watch/s
       const migrated = await rows();
       assert.deepEqual(migrated.map(({ is_active, ...row }) => row), before);
       assert.ok(migrated.every(row => row.is_active === 1));
+      await pool.query(await readFile(`${__dirname}/../../database/migrations/05-remove-snapshot-generation.sql`, 'utf8'));
+      const activeBaseline = await rows();
       const watches = (await pool.query('SELECT * FROM Watchlists ORDER BY id'))[0];
       const count = async sections => {
         const response = await ingest(pool, sections);
@@ -231,7 +287,7 @@ test('MariaDB migration, omission, reactivation, rollback and historical watch/s
       assert.equal(await count([section()]), 0);
       const omitted = await rows();
       assert.deepEqual(omitted.map(row => row.is_active), [1, 0, 0, 1, 1]);
-      for (const index of [1, 2]) assert.deepEqual(omitted[index], { ...migrated[index], is_active: 0 });
+      for (const index of [1, 2]) assert.deepEqual(omitted[index], { ...activeBaseline[index], is_active: 0 });
       assert.deepEqual((await pool.query('SELECT * FROM Watchlists ORDER BY id'))[0], watches);
       const courses = createCourses(pool, auth);
       const search = await invoke(courses, 'get', '/', { query: { term: '202710', subject: 'CS', limit: '1' } });
@@ -271,9 +327,8 @@ test('MariaDB migration, omission, reactivation, rollback and historical watch/s
         assert.equal((await rows()).find(row => row.crn === '01235').id, 2);
         assert.deepEqual((await pool.query('SELECT * FROM Watchlists ORDER BY id'))[0], watches);
       }
-      assert.ok((await rows()).every(row => row.snapshot_generation === 7));
-      const [[metadata]] = await pool.query('SELECT snapshot_generation,last_refresh_status,last_refresh_source FROM DepartmentSyncs');
-      assert.deepEqual(metadata, { snapshot_generation: 7, last_refresh_status: 'error', last_refresh_source: 'on_demand' });
+      const [[metadata]] = await pool.query('SELECT last_refresh_status,last_refresh_source FROM DepartmentSyncs');
+      assert.deepEqual(metadata, { last_refresh_status: 'error', last_refresh_source: 'on_demand' });
       // Catalog options must also remove a department/term with only inactive rows.
       await pool.query("UPDATE Sections SET is_active=FALSE WHERE subject='IT' OR term='202795'");
       assert.deepEqual((await invoke(courses, 'get', '/options')).body, { terms: [{ code: '202710', departments: ['CS'] }] });

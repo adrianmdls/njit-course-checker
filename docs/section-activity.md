@@ -69,10 +69,11 @@ Fresh databases receive the column through `database/init/01-schema.sql` and do
 not need this migration. Existing volumes do not rerun initialization automatically.
 Do not rerun unrelated migrations or reset a volume.
 
-Optional experimental `snapshot_generation`, `last_refresh_status`, and
-`last_refresh_source` columns remain unused and untouched. Explicit-column
-statements preserve them; existing non-null columns without suitable defaults or
-custom triggers still require schema-specific review. Do not drop these columns.
+The obsolete experimental `snapshot_generation` columns can be removed with the
+separate [generation cleanup migration](snapshot-generation-cleanup.md). They are
+not used by F2. Optional `last_refresh_status` and `last_refresh_source` columns
+remain unused and untouched; retain them. Existing non-null columns without
+suitable defaults or custom triggers still require schema-specific review.
 
 For an application rollback, retain the additive column and its data. Older code
 ignores activity and restores the previous stale-search behavior. Dropping the

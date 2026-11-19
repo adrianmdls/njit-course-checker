@@ -132,8 +132,9 @@ Run Express validation/search tests with `npm test --prefix backend`. Database
 cases skip unless `TEST_DB_PORT` points to a **fresh disposable** MariaDB server
 with the documented test credentials. Never use an application database. The
 sync database test adds compatibility columns to that disposable schema only,
-then verifies nonempty/empty upserts leave existing generation/diagnostic values
-unchanged. It checks Watchlists, stable IDs, timestamps and rollback of empty
+then verifies nonempty/empty upserts leave existing diagnostic values unchanged.
+Obsolete generation preservation checks have been replaced by the
+[generation cleanup migration regressions](snapshot-generation-cleanup.md). It checks Watchlists, stable IDs, timestamps and rollback of empty
 completion failures, alongside the existing upsert/rollback/locking tests.
 
 Run the fixture-only full pipeline:

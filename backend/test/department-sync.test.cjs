@@ -283,15 +283,11 @@ test('MariaDB upserts, watchlists, rollback, idempotency, Winter terms and locki
         else process.env.CHECKER_MONITORING_TARGETS = previousTargets;
       }
       // Only this disposable database receives experimental compatibility columns.
-      await pool.query(`ALTER TABLE Sections ADD COLUMN snapshot_generation BIGINT UNSIGNED NOT NULL DEFAULT 0`);
       await pool.query(`ALTER TABLE DepartmentSyncs
-        ADD COLUMN snapshot_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
         ADD COLUMN last_refresh_status ENUM('success','error') DEFAULT NULL,
         ADD COLUMN last_refresh_source ENUM('scheduled','on_demand') DEFAULT NULL`);
-      await pool.query("UPDATE Sections SET snapshot_generation=7");
-      await pool.query("UPDATE DepartmentSyncs SET snapshot_generation=7,last_refresh_status='error',last_refresh_source='on_demand'");
-      const [metadataBefore] = await pool.query('SELECT subject,term,snapshot_generation,last_refresh_status,last_refresh_source FROM DepartmentSyncs ORDER BY subject,term');
-      const [sectionGenerations] = await pool.query('SELECT id,snapshot_generation FROM Sections ORDER BY id');
+      await pool.query("UPDATE DepartmentSyncs SET last_refresh_status='error',last_refresh_source='on_demand'");
+      const [metadataBefore] = await pool.query('SELECT subject,term,last_refresh_status,last_refresh_source FROM DepartmentSyncs ORDER BY subject,term');
       assert.equal((await api.post(changed)).status, 200);
       const capture = async () => {
         const data = {};
@@ -309,14 +305,12 @@ test('MariaDB upserts, watchlists, rollback, idempotency, Winter terms and locki
       assert.deepEqual(await capture(), preserved, 'empty sync preserves every stored course, section and Watchlist field');
       const [[emptySync]] = await pool.query("SELECT UNIX_TIMESTAMP(last_synced_at) AS synced FROM DepartmentSyncs WHERE subject='CS' AND term='202710'");
       assert.ok(emptySync.synced > Date.UTC(2000, 0, 2) / 1000);
-      const [metadataAfter] = await pool.query('SELECT subject,term,snapshot_generation,last_refresh_status,last_refresh_source FROM DepartmentSyncs ORDER BY subject,term');
+      const [metadataAfter] = await pool.query('SELECT subject,term,last_refresh_status,last_refresh_source FROM DepartmentSyncs ORDER BY subject,term');
       assert.deepEqual(metadataAfter, metadataBefore, 'experimental metadata is untouched');
-      const [generationsAfter] = await pool.query('SELECT id,snapshot_generation FROM Sections ORDER BY id');
-      assert.deepEqual(generationsAfter, sectionGenerations);
       response = await api.post(snapshot({ subject: 'DS', sections: [] }));
       assert.equal(response.status, 200, 'first-ever empty department succeeds');
-      const [[newSync]] = await pool.query("SELECT snapshot_generation,last_refresh_status,last_refresh_source FROM DepartmentSyncs WHERE subject='DS' AND term='202710'");
-      assert.deepEqual(newSync, { snapshot_generation: 0, last_refresh_status: null, last_refresh_source: null });
+      const [[newSync]] = await pool.query("SELECT last_refresh_status,last_refresh_source FROM DepartmentSyncs WHERE subject='DS' AND term='202710'");
+      assert.deepEqual(newSync, { last_refresh_status: null, last_refresh_source: null });
       await pool.query("CREATE TRIGGER fail_empty BEFORE INSERT ON DepartmentSyncs FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='injected empty failure'");
       const [syncBeforeFailure] = await pool.query('SELECT * FROM DepartmentSyncs ORDER BY subject,term');
       assert.equal((await api.post(empty)).status, 503);

@@ -361,6 +361,8 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(columns[0]["Type"].lower().startswith("tinyint"))
         self.assertEqual(columns[0]["Null"], "NO")
         self.assertEqual(str(columns[0]["Default"]), "1")
+        for table in ("Sections", "DepartmentSyncs"):
+            self.assertEqual(self.sql(f"SHOW COLUMNS FROM {table} LIKE 'snapshot_generation'"), [])
         # Reuse rather than copy the existing migration/experimental-column/SQL
         # regressions. They create/drop only their own random schema on this test DB.
         output = self.command("exec", "-T", "-e", "TEST_DB_HOST=db", "-e", "TEST_DB_PORT=3306",

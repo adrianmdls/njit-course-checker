@@ -161,6 +161,8 @@ real Banner empty-result semantics are verified. Search/counts/catalog options
 exclude inactive sections; watchlists include them and both APIs expose boolean
 `is_active`. Inactive watched sections still contribute monitoring targets.
 See [activity behavior and the required existing-volume migration](../docs/section-activity.md).
+Obsolete experimental generation columns have a separate, optional
+[forward-only cleanup migration](../docs/snapshot-generation-cleanup.md).
 
 All writes and the successful `DepartmentSyncs.last_synced_at` completion timestamp share one transaction. A MariaDB advisory lock named `njit:sync:<subject>:<term>` rejects overlapping API requests with `409` across backend instances. Row locks protect comparisons and updates; the advisory lock is released before returning the connection to the pool. Database failures roll back the transaction and return `503` through the backend error handler. Other responses include `400` for invalid input/JSON, `401` for invalid credentials, `413` for oversized JSON, and `415` for a non-JSON content type.
 
