@@ -135,8 +135,7 @@ class DepartmentSyncTests(unittest.TestCase):
     @patch("src.department_sync.submit_department_snapshot", return_value=COUNTS)
     @patch("src.department_sync.get_sections", return_value=BANNER)
     def test_fetches_parses_and_submits_without_database(self, fetch, submit, output):
-        with patch("src.database.get_connection", side_effect=AssertionError("No database writes")):
-            self.assertIsNone(sync_department(" it ", 202795))
+        self.assertIsNone(sync_department(" it ", 202795))
         fetch.assert_called_once_with("IT", "202795")
         submit.assert_called_once_with("IT", "202795", parse_all_sections(BANNER))
         output.assert_called_once_with("Synchronized 1 courses and 1 sections for IT 202795")
@@ -161,17 +160,6 @@ class DepartmentSyncTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sync_department("IT", "202795", data=[{"SECTIONS_TABLE": "upstream error"}])
         submit.assert_not_called()
-
-    def test_existing_search_helper_submits_without_database_lock(self):
-        from src import course_search
-
-        with patch("src.database.get_connection", side_effect=AssertionError("No database lock")), \
-             patch.object(course_search, "is_department_cache_fresh", return_value=False), \
-             patch.object(course_search, "search_cached_courses", return_value=[{"section_id": 1}]), \
-             patch.object(course_search, "sync_department") as sync:
-            result = course_search.search_courses("IT", "490", "202795")
-        sync.assert_called_once_with("IT", "202795")
-        self.assertEqual(result["source"], "banner")
 
 
 if __name__ == "__main__":

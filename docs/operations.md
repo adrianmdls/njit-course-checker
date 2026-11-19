@@ -104,15 +104,4 @@ automatically active targets.
 
 ## Notifications
 
-Automatic Discord and email notifications are inactive. The dashboard provides
-no notification toggle. The retained Discord utility can still
-send a manual message when `DISCORD_WEBHOOK_URL` is configured in the checker:
-
-```sh
-docker compose exec checker python -c \
-  'from src.discord_notify import send_discord_notification; print(send_discord_notification("NJIT Course Checker: Test notification"))'
-```
-
-It returns `True` on success and `False` when disabled or unsuccessful. Recreate
-the checker after changing the webhook setting. This manual command sends an
-actual message; it is not part of automated verification.
+Notification delivery is unavailable.

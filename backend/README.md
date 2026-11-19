@@ -220,9 +220,8 @@ configuration prevents startup. See the [legacy monitoring upgrade notes](../REA
 before deploying against an existing database.
 
 Python polling and manual checks use HTTP only. Express owns all monitoring
-reads, section writes, status comparisons, and synchronization timestamps. The
-standalone legacy Python search helper retains SQL cache reads outside the
-polling architecture. No notifications are sent by these endpoints.
+reads, section writes, status comparisons, synchronization timestamps, and
+MariaDB queries for course search. No notifications are sent by these endpoints.
 
 ## Tests
 

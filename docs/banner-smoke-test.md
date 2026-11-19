@@ -250,9 +250,7 @@ legacy monitoring targets deliberately; NULL course links do not preserve
 monitoring intent.
 
 Known limits remain: no notifications, no snapshot ordering protection for
-multiple producers, and ambiguous completion after an HTTP timeout. The
-standalone legacy search helper still has SQL cache reads and must not run on
-the checker VM without a separate migration. A full department body may also
-hit a proxy body limit before Express; fixture ingestion bypasses Nginx even
-though search/browser tests use it, so check the deployed proxy with
-representative real snapshots.
+multiple producers, and ambiguous completion after an HTTP timeout. A full
+department body may hit a proxy body limit before Express; fixture ingestion
+bypasses Nginx even though search/browser tests use it, so check the deployed
+proxy with representative real snapshots.

@@ -96,17 +96,9 @@ Failed fetches, malformed snapshots, rejected submissions and rollbacks do not
 advance successful database synchronization timestamps. A client timeout remains
 ambiguous: Express may finish committing after the client stops waiting.
 
-Express now owns status comparisons and returns aggregate change counts. Python
-logs department summaries; its previous per-section Discord transition
-notifications and `notification.log` updates are inactive. Notification delivery
-requires a backend-owned event design in a later commit. The standalone
-`src.discord_notify` utility remains available for manual use.
-
-`src/course_search.py` has no polling/frontend callers and remains an isolated
-legacy command-line helper. Its cache reads in `src/database.py` still require
-manually supplied `DB_*` credentials; these are no longer passed to the checker.
-PyMySQL remains in requirements solely for that helper. React uses the Express
-course-search API instead.
+Express compares section statuses and returns aggregate change counts. Python
+logs department summaries. React searches the MariaDB catalog through the
+Express course-search API.
 
 See the [smoke-test procedure](docs/banner-smoke-test.md) for Python unit tests,
 disposable pipeline tests, real React/Nginx/backend browser verification, and
