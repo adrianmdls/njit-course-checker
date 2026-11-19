@@ -33,8 +33,10 @@ try {
   const responses = []
   const watchlistRequests = []
   const errors = []
+  let restorationPaused
   ws.onmessage = event => {
     const message = JSON.parse(event.data)
+    if (message.method === 'Fetch.requestPaused') restorationPaused?.resolve(message.params)
     if (message.method === 'Network.requestWillBeSent' && message.params.request.url.includes('/api/courses?')) {
       requests.push(new URL(message.params.request.url))
     }
@@ -106,6 +108,40 @@ try {
   await evaluate(`setField('username','course_search_fixture'); setField('password','integration-only-search-password')`)
   await evaluate(`document.querySelector('button[type=submit]').click()`)
   await waitFor(`location.pathname==='/dashboard' && Boolean(button('Search Courses'))`)
+  // Delay real server responses at Chrome's response boundary. Chrome applies
+  // the actual Set-Cookie headers; no response body or header is replaced.
+  const sessionCookie = async () => (await send('Network.getCookies', { urls: [origin] })).cookies
+    .find(cookie => cookie.name === 'njit.sid')
+  await send('Fetch.enable', { patterns: [{ urlPattern: `${origin}/api/auth/me?race=1`, requestStage: 'Response' }] })
+  try {
+    for (const order of ['login-first', 'restoration-first']) {
+      const oldCookie = await sessionCookie()
+      restorationPaused = Promise.withResolvers()
+      await evaluate(`window.restorationResult=null; void fetch('/api/auth/me?race=1').then(r=>{window.restorationResult=r.status}); true`)
+      let timer
+      const paused = await Promise.race([restorationPaused.promise,
+        new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error('Restoration did not pause')), 10000) })])
+        .finally(() => clearTimeout(timer))
+      assert.equal(paused.responseStatusCode, 200)
+      assert.ok(!paused.responseHeaders.some(header => header.name.toLowerCase() === 'set-cookie'), 'restoration must never replace a login cookie')
+      if (order === 'restoration-first') {
+        await send('Fetch.continueResponse', { requestId: paused.requestId })
+        await waitFor('window.restorationResult===200')
+      }
+      assert.equal(await evaluate(`fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'NJIT-Course-Checker'},body:JSON.stringify({identifier:'course_search_fixture',password:'integration-only-search-password'})}).then(r=>r.status)`), 200)
+      const newCookie = await sessionCookie()
+      assert.notEqual(newCookie.value, oldCookie.value, 'login regenerates the browser cookie')
+      if (order === 'login-first') {
+        await send('Fetch.continueResponse', { requestId: paused.requestId })
+        await waitFor('window.restorationResult===200')
+      }
+      assert.equal((await sessionCookie()).value, newCookie.value, 'Chrome retains the authenticated cookie in either response order')
+      assert.equal(await evaluate(`fetch('/api/auth/me').then(r=>r.status)`), 200)
+    }
+  } finally {
+    await send('Fetch.disable')
+  }
+  console.log('PASS Chrome cookie jar with delayed restoration/login responses in both orders')
   // A failed metadata request must leave a safe, retryable UI. All successful
   // responses below still come from the real backend, without interception.
   await send('Network.setBlockedURLs', { urls: [`${origin}/api/courses/options`] })

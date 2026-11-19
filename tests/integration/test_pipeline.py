@@ -417,6 +417,12 @@ class PipelineTests(unittest.TestCase):
                               "node", "--test", "test/section-activity.test.cjs")
         print(output, flush=True)
 
+    def test_session_cookie_restoration_and_expiration_regressions(self):
+        output = self.command("exec", "-T", "-e", "TEST_DB_HOST=db", "-e", "TEST_DB_PORT=3306",
+                              "-e", "TEST_DB_PASSWORD=integration-only-password", "backend",
+                              "node", "--test", "test/auth.test.cjs")
+        print(output, flush=True)
+
     def test_malformed_fixture_never_advances_completion(self):
         self.seed_watchlists()
         self.assertEqual(self.probe("poll")["errors"], 0)

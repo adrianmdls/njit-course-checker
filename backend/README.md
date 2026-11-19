@@ -22,6 +22,17 @@ Registration requires a username of 3–50 letters, digits, or underscores and a
 
 Authentication POST requests require JSON, an `Origin` matching `APP_ORIGIN`, and `X-Requested-With: NJIT-Course-Checker`. The React request helper supplies the application headers; the browser supplies Origin.
 
+Session restoration (`GET`/`HEAD /api/auth/me`) never issues or clears a session
+cookie, including on expiration. This prevents a delayed restoration response
+from overwriting the regenerated cookie from a newer login. Login still destroys
+the previous session ID; logout destroys the session and clears its cookie.
+Ordinary authenticated course/watchlist requests still renew the rolling
+30-minute cookie and store expiry. Restoration alone does not extend the browser
+cookie's lifetime. The eight-hour authentication-age limit, production Secure
+host-only cookie, HttpOnly/SameSite flags and mutation protections remain in force.
+The disposable pipeline runs `test/auth.test.cjs` against its own random schema;
+`RUN_BROWSER_TESTS=1` also checks both response orders in Chrome's actual cookie jar.
+
 ## Course search
 
 `GET /api/courses/options` accepts no query parameters and returns, for example,
