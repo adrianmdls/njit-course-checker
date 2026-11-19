@@ -48,14 +48,6 @@ class BannerValidationError(ValueError):
         super().__init__(json.dumps({"event": "banner_validation_failed", **self.validation}))
 
 
-def parse_section(sections, crn):
-    """Use the same strict snapshot parser for individual section lookups."""
-    for section in parse_all_sections(sections):
-        if section["crn"] == str(crn):
-            return {key: value for key, value in section.items() if key not in ("course", "title")}
-    raise ValueError("Requested CRN was not found in the retrieved sections")
-
-
 def parse_all_sections(data):
     """Parse a complete list envelope; [] is the explicit zero-section form.
 

@@ -102,32 +102,25 @@ test('validation diagnostics identify only fixed fields, row indexes and reason 
   } finally { await api.close(); }
 });
 
-test('watched-only targets exclude explicit configuration and validate query parameters', async () => {
-  const previous = process.env.CHECKER_MONITORING_TARGETS;
-  process.env.CHECKER_MONITORING_TARGETS = '[{"subject":"IT","term":"202710"}]';
+test('both target queries return distinct watched pairs and reject invalid parameters before SQL', async () => {
   const calls = [];
   const api = await serve({ async execute(sql) {
     calls.push(sql);
     return [[{ subject: 'CS', term: '202710' }, { subject: 'CS', term: '202710' }]];
   } });
   try {
-    assert.deepEqual(await (await api.get({}, '?watched_only=true')).json(), {
-      targets: [{ subject: 'CS', term: '202710' }],
-    });
-    assert.deepEqual(await (await api.get()).json(), {
-      targets: [{ subject: 'CS', term: '202710' }, { subject: 'IT', term: '202710' }],
-    });
+    for (const query of ['', '?watched_only=true']) {
+      const response = await api.get({}, query);
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { targets: [{ subject: 'CS', term: '202710' }] });
+    }
     assert.match(calls[0], /INNER JOIN Watchlists/);
     const before = calls.length;
     for (const query of ['?watched_only=false', '?watched_only=true&watched_only=true', '?unexpected=1']) {
       assert.equal((await api.get({}, query)).status, 400);
     }
     assert.equal(calls.length, before);
-  } finally {
-    await api.close();
-    if (previous === undefined) delete process.env.CHECKER_MONITORING_TARGETS;
-    else process.env.CHECKER_MONITORING_TARGETS = previous;
-  }
+  } finally { await api.close(); }
 });
 
 test('production requires HTTPS for machine authentication', async () => {
@@ -142,20 +135,6 @@ test('production requires HTTPS for machine authentication', async () => {
     if (previous === undefined) delete process.env.APP_ENV;
     else process.env.APP_ENV = previous;
     await api.close();
-  }
-});
-
-test('invalid explicit monitoring configuration fails without exposing its value', () => {
-  const previous = process.env.CHECKER_MONITORING_TARGETS;
-  try {
-    for (const value of ['private-invalid-value', '{}', '[null]', '[{"subject":"IT","term":"202711"}]']) {
-      process.env.CHECKER_MONITORING_TARGETS = value;
-      assert.throws(() => createSync({}, token), error =>
-        error.message === 'CHECKER_MONITORING_TARGETS must be a JSON array of valid subject/term pairs');
-    }
-  } finally {
-    if (previous === undefined) delete process.env.CHECKER_MONITORING_TARGETS;
-    else process.env.CHECKER_MONITORING_TARGETS = previous;
   }
 });
 
@@ -260,27 +239,16 @@ test('MariaDB upserts, watchlists, rollback, idempotency, Winter terms and locki
         assert.equal(course.title, expected, title);
       }
       await pool.execute('INSERT INTO Sections (subject,term,crn) VALUES (?,?,?)', ['ECE', '202795', '98765']);
-      const previousTargets = process.env.CHECKER_MONITORING_TARGETS;
-      let explicitApi;
-      try {
-        process.env.CHECKER_MONITORING_TARGETS = JSON.stringify([
-          { subject: 'IT', term: '202710' }, { subject: 'CS', term: '202710' },
-        ]);
-        explicitApi = await serve(pool);
-        const response = await explicitApi.get();
-        assert.equal(response.status, 200);
-        assert.deepEqual(await response.json(), { targets: [
-          { subject: 'CS', term: '202710' }, { subject: 'IT', term: '202710' },
-        ] }, 'watchlists and explicit targets merge; unrelated NULL course rows are ignored');
-        await pool.execute('DELETE FROM Watchlists WHERE user_id = ?', [1]);
-        assert.deepEqual(await (await explicitApi.get()).json(), { targets: [
-          { subject: 'IT', term: '202710' }, { subject: 'CS', term: '202710' },
-        ] }, 'explicit targets persist after ingestion creates course links');
-        assert.deepEqual(await (await api.get()).json(), { targets: [] });
-      } finally {
-        if (explicitApi) await explicitApi.close();
-        if (previousTargets === undefined) delete process.env.CHECKER_MONITORING_TARGETS;
-        else process.env.CHECKER_MONITORING_TARGETS = previousTargets;
+      for (const query of ['', '?watched_only=true']) {
+        const targets = await api.get({}, query);
+        assert.equal(targets.status, 200);
+        assert.deepEqual(await targets.json(), { targets: [
+          { subject: 'CS', term: '202710' },
+        ] }, 'unwatched catalog and unlinked sections are excluded');
+      }
+      await pool.execute('DELETE FROM Watchlists WHERE user_id = ?', [1]);
+      for (const query of ['', '?watched_only=true']) {
+        assert.deepEqual(await (await api.get({}, query)).json(), { targets: [] }, 'the last watch removal demotes the pair');
       }
       // Only this disposable database receives experimental compatibility columns.
       await pool.query(`ALTER TABLE DepartmentSyncs

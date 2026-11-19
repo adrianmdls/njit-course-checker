@@ -117,15 +117,6 @@ async function synchronize(pool, snapshot) {
 
 module.exports = function createDepartmentSync(pool, token = process.env.CHECKER_API_TOKEN) {
   const router = express.Router();
-  let explicitTargets;
-  try {
-    explicitTargets = JSON.parse(process.env.CHECKER_MONITORING_TARGETS || '[]');
-    if (!Array.isArray(explicitTargets) || explicitTargets.some(target =>
-      !target || typeof target.subject !== 'string' || !/^[A-Z][A-Z0-9]{0,9}$/.test(target.subject) ||
-      typeof target.term !== 'string' || !/^\d{4}(10|50|90|95)$/.test(target.term))) throw new Error();
-  } catch {
-    throw new Error('CHECKER_MONITORING_TARGETS must be a JSON array of valid subject/term pairs');
-  }
   const digest = value => createHash('sha256').update(value).digest();
   const expected = token ? digest(token) : null;
   router.use(['/department', '/targets'], (req, res, next) => {
@@ -147,7 +138,7 @@ module.exports = function createDepartmentSync(pool, token = process.env.CHECKER
       FROM Sections s INNER JOIN Watchlists w ON w.section_id = s.id
       ORDER BY s.subject, s.term`);
     const targets = new Map();
-    for (const { subject, term } of [...watched, ...(req.query.watched_only ? [] : explicitTargets)]) {
+    for (const { subject, term } of watched) {
       targets.set(`${subject}:${term}`, { subject, term });
     }
     res.json({ targets: [...targets.values()] });

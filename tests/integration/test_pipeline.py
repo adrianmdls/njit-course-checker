@@ -7,19 +7,78 @@ Host Python uses the standard library; checker SQL inspection runs in the backen
 import json
 import os
 from pathlib import Path
+import selectors
+import signal
 import subprocess
 import socket
+import sys
+import tempfile
+import time
 import unittest
 import uuid
 
 
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = ROOT / "tests" / "integration" / "compose.yaml"
+AUTH_COMPOSE = COMPOSE.with_name("auth-compose.yaml")
 SQL = """const pool = require('./src/db');
 pool.execute(process.argv[1], JSON.parse(process.argv[2]))
   .then(([rows]) => process.stdout.write(JSON.stringify(rows)))
   .catch(error => { console.error(error.code || 'SQL failed'); process.exitCode = 1; })
   .finally(() => pool.end());"""
+WATCHED_PAIRS = [["CS", "202710"], ["IT", "202795"]]
+INITIAL_COUNTS = [(1, 2, 1), (2, 2, 1)]
+
+
+def signal_browser_group(group, signum):
+    try:
+        os.killpg(group, signum)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        # macOS reports EPERM when only exited children remain in the group.
+        # The caller still waits for the group leader with a deadline.
+        if sys.platform != "darwin":
+            raise
+
+
+def run_browser(command, identity, *, timeout, terminate_grace=2):
+    with tempfile.TemporaryDirectory(prefix="njit-browser-test-") as profile, \
+         tempfile.TemporaryFile(mode="w+", encoding="utf-8") as request:
+        json.dump({**identity, "profile": os.path.abspath(profile)}, request)
+        request.seek(0)
+        helper = subprocess.Popen(command, stdin=request, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, start_new_session=True)
+        output = bytearray()
+        finished = False
+        try:
+            deadline = time.monotonic() + timeout
+            with selectors.DefaultSelector() as selector:
+                selector.register(helper.stdout, selectors.EVENT_READ)
+                while deadline > time.monotonic():
+                    if not selector.select(max(0, deadline - time.monotonic())):
+                        continue
+                    chunk = os.read(helper.stdout.fileno(), 65536)
+                    if not chunk:
+                        finished = True
+                        break
+                    output.extend(chunk)
+            if not finished:
+                raise subprocess.TimeoutExpired(command, timeout, output=bytes(output))
+        finally:
+            # Keep the child unreaped until signaling is finished so its process
+            # group ID cannot be reused. Chrome and its workers inherit this group.
+            try:
+                if not finished:
+                    signal_browser_group(helper.pid, signal.SIGTERM)
+                    time.sleep(terminate_grace)
+            finally:
+                try:
+                    signal_browser_group(helper.pid, signal.SIGKILL)
+                finally:
+                    helper.stdout.close()
+                    helper.wait(timeout=5)
+        return subprocess.CompletedProcess(command, helper.returncode, output.decode(errors="replace"))
 
 
 class PipelineTests(unittest.TestCase):
@@ -37,8 +96,10 @@ class PipelineTests(unittest.TestCase):
             listener.bind(("127.0.0.1", 0))
             cls.http_port = listener.getsockname()[1]
         cls.environment = dict(os.environ, INTEGRATION_HTTP_PORT=str(cls.http_port))
-        cls.compose = ["docker", "compose", "--env-file", os.devnull,
-                       "-p", f"njit-banner-test-{uuid.uuid4().hex[:10]}", "-f", str(COMPOSE)]
+        cls.project = f"njit-banner-test-{uuid.uuid4().hex[:10]}"
+        cls.compose = ["docker", "compose", "--env-file", os.devnull, "-p", cls.project, "-f", str(COMPOSE)]
+        if os.environ.get("RUN_BROWSER_TESTS") == "1":
+            cls.compose.extend(["-f", str(AUTH_COMPOSE)])
         cls.addClassCleanup(cls.cleanup)
         print("Building disposable integration stack...", flush=True)
         cls.command("build", "backend", "checker-test", "frontend")
@@ -64,17 +125,29 @@ class PipelineTests(unittest.TestCase):
                                        input=json.dumps({"mode": mode, **options})))
 
     def verify_browser(self, empty=False):
-        browser = subprocess.run(["node", str(ROOT / "tests/integration/course_search_browser.mjs"),
-                                  f"http://127.0.0.1:{self.http_port}", "empty" if empty else "catalog"], text=True,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
-                                 env=dict(os.environ, INTEGRATION_BACKEND_CONTAINER=self.command("ps", "-q", "backend").strip()))
-        self.assertEqual(browser.returncode, 0, browser.stdout + browser.stderr)
+        command = ["node", str(COMPOSE.with_name("course_search_browser.mjs")),
+                   f"http://127.0.0.1:{self.http_port}", "empty" if empty else "catalog"]
+        identity = {"backendContainer": self.command("ps", "-q", "backend").strip()}
+        browser = run_browser(command, identity, timeout=120)
+        self.assertEqual(browser.returncode, 0, browser.stdout)
         print(browser.stdout, flush=True)
 
     def setUp(self):
         self.session_cookies = None
         for table in ("Watchlists", "Sections", "Courses", "Users", "DepartmentSyncs", "sessions"):
             self.sql(f"DELETE FROM {table}")
+
+    @unittest.skipUnless(os.environ.get("RUN_BROWSER_TESTS") == "1", "Set RUN_BROWSER_TESTS=1 to run Chrome")
+    def test_disposable_authentication_browser_lifecycle(self):
+        identity = {
+            "project": self.project,
+            "origin": f"http://127.0.0.1:{self.http_port}",
+            "containers": {service: self.command("ps", "-a", "-q", service).strip()
+                           for service in ("backend", "db", "frontend", "db-storage")},
+        }
+        browser = run_browser(["node", str(COMPOSE.with_name("auth_browser.mjs"))], identity, timeout=300)
+        self.assertEqual(browser.returncode, 0, browser.stdout)
+        print(browser.stdout, flush=True)
 
     def seed_watchlists(self):
         self.sql("INSERT INTO Users (username,email,password_hash) VALUES (?,?,?),(?,?,?)",
@@ -90,6 +163,18 @@ class PipelineTests(unittest.TestCase):
                   users[1]["id"], ids["12345"], users[1]["id"], ids["54321"]])
         return sections, self.sql("SELECT * FROM Watchlists ORDER BY id")
 
+    def scheduled_batch(self, expected_counts=None, **options):
+        result = self.probe("scheduled_batch", **options)
+        self.assertEqual(result["banner_calls"], WATCHED_PAIRS, result)
+        if expected_counts is not None:
+            self.assertEqual(result["errors"], [], result)
+            self.assertEqual(result["submit_attempts"], WATCHED_PAIRS)
+            submitted = result["submissions"]
+            self.assertEqual([[row["subject"], row["term"]] for row in submitted], WATCHED_PAIRS)
+            self.assertEqual([(row["courses"], row["sections"], row["status_changes"]) for row in submitted],
+                             expected_counts)
+        return result
+
     def snapshot(self):
         return {table: self.sql(f"SELECT * FROM {table} ORDER BY " +
                                ("subject,term" if table == "DepartmentSyncs" else "id"))
@@ -100,18 +185,32 @@ class PipelineTests(unittest.TestCase):
         self.sql("UPDATE Sections SET last_checked_at = ?", ["2000-01-01 00:00:00"])
         self.sql("UPDATE DepartmentSyncs SET last_synced_at = ?", ["2000-01-01 00:00:00"])
 
-    def test_configured_and_watched_targets_merge(self):
-        self.assertEqual(self.probe("targets"), {"targets": [{"subject": "IT", "term": "202795"}]})
-        self.seed_watchlists()
-        self.assertEqual(self.probe("targets"), {"targets": [
-            {"subject": "CS", "term": "202710"}, {"subject": "IT", "term": "202795"}]})
+    def test_watched_targets_deduplicate_and_demote(self):
+        def assert_targets(pairs):
+            expected = {"targets": [{"subject": subject, "term": term} for subject, term in pairs]}
+            for watched_only in (False, True):
+                self.assertEqual(self.probe("targets", watched_only=watched_only), expected)
 
-    def test_polling_upserts_and_retries_preserve_identity(self):
+        self.assertEqual(self.probe("submit", subject="CS", term="202790", section_count=1)["sections"], 1)
+        self.sql("INSERT INTO Sections (subject,term,crn) VALUES ('ECE','202795','98765')")
+        assert_targets([])
+        self.seed_watchlists()
+        self.sql("UPDATE Sections SET is_active=FALSE WHERE subject='IT' AND term='202795'")
+        self.age_timestamps()
+        before = self.snapshot()
+        assert_targets(WATCHED_PAIRS)
+        self.assertEqual(self.snapshot(), before)
+        self.sql("DELETE w FROM Watchlists w JOIN Users u ON u.id=w.user_id "
+                 "WHERE u.username='fixture_one'")
+        assert_targets(WATCHED_PAIRS)
+        self.sql("DELETE w FROM Watchlists w JOIN Sections s ON s.id=w.section_id WHERE s.subject='CS'")
+        assert_targets([WATCHED_PAIRS[1]])
+        self.sql("DELETE FROM Watchlists")
+        assert_targets([])
+
+    def test_scheduled_upserts_and_retries_preserve_identity(self):
         original, watches = self.seed_watchlists()
-        result = self.probe("poll")
-        self.assertEqual(result["errors"], 0, result)
-        self.assertEqual(result["banner_calls"], [["CS", "202710"], ["IT", "202795"]])
-        self.assertTrue(all("1 status changes" in row for row in result["results"]), result)
+        self.scheduled_batch(INITIAL_COUNTS)
         stored = self.snapshot()
         self.assertEqual(len(stored["Courses"]), 3)
         self.assertEqual(len(stored["Sections"]), 4)
@@ -120,7 +219,7 @@ class PipelineTests(unittest.TestCase):
                          [("CS", "202710"), ("IT", "202795")])
         self.assertTrue(all(row["last_synced_at"] for row in stored["DepartmentSyncs"]))
         self.assertTrue(all(row["course_id"] and row["status"] == "OPEN" and row["capacity"] == 30
-                            and row["enrolled"] == 20 for row in stored["Sections"]))
+                            and row["enrolled"] == 20 and row["last_checked_at"] for row in stored["Sections"]))
         self.assertEqual({(row["subject"], row["course_number"]): row["title"] for row in stored["Courses"]},
                          {("CS", "100"): "Introduction", ("IT", "101"): "Introduction",
                           ("IT", "490"): "Special Topics - AI"})
@@ -129,23 +228,27 @@ class PipelineTests(unittest.TestCase):
         ids = {row["crn"]: row["id"] for row in stored["Sections"]}
         self.assertTrue(all(ids[row["crn"]] == row["id"] for row in original))
         self.assertEqual(stored["Watchlists"], watches)
-        repeated = self.probe("poll")
-        self.assertEqual(repeated["errors"], 0)
-        self.assertTrue(all("0 status changes" in row for row in repeated["results"]), repeated)
-        self.assertEqual(self.sql("SELECT id,crn FROM Sections ORDER BY id"),
-                         [{"id": row["id"], "crn": row["crn"]} for row in stored["Sections"]])
-        self.assertEqual(self.sql("SELECT COUNT(*) AS count FROM Courses")[0]["count"], 3)
-        self.assertEqual(self.sql("SELECT * FROM Watchlists ORDER BY id"), watches)
-        changed = self.probe("submit", subject="CS", term="202710", status="CLOSED")
-        self.assertEqual(changed, {"courses": 1, "sections": 2, "status_changes": 2})
-        self.assertEqual(self.probe("submit", subject="CS", term="202710", status="CLOSED"),
-                         {"courses": 1, "sections": 2, "status_changes": 0})
+        self.age_timestamps()
+        aged = self.snapshot()
+        self.scheduled_batch([(1, 2, 0), (2, 2, 0)])
+        retried = self.snapshot()
+        self.assertEqual(retried["Courses"], stored["Courses"])
+        self.assertEqual(retried["Watchlists"], watches)
+        for table, timestamp in (("Sections", "last_checked_at"), ("DepartmentSyncs", "last_synced_at")):
+            self.assertEqual(len(retried[table]), len(aged[table]))
+            for current, previous in zip(retried[table], aged[table]):
+                self.assertNotEqual(current[timestamp], previous[timestamp])
+                self.assertEqual(dict(current, **{timestamp: previous[timestamp]}), previous)
+        self.scheduled_batch([(1, 2, 2), (2, 2, 2)], status="CLOSED")
+        self.assertTrue(all(row["status"] == "CLOSED" for row in self.snapshot()["Sections"]))
+        self.scheduled_batch([(1, 2, 0), (2, 2, 0)], status="CLOSED")
 
     def test_invalid_credentials_reject_get_and_post_without_writes(self):
         self.seed_watchlists()
         before = self.snapshot()
-        for mode in ("targets", "submit"):
-            result = self.probe(mode, invalid_token=True, subject="IT", term="202795")
+        for mode, options in (("targets", {}), ("targets", {"watched_only": True}),
+                              ("submit", {"subject": "IT", "term": "202795"})):
+            result = self.probe(mode, invalid_token=True, **options)
             self.assertIn("HTTP 401", result["error"])
         self.assertEqual(self.snapshot(), before)
 
@@ -201,9 +304,8 @@ class PipelineTests(unittest.TestCase):
         # These legacy watches belong to observed fixture CRNs. Pagination must
         # not rely on deactivating unrelated, omitted sections to reach 53 rows.
         self.sql("UPDATE Sections SET crn = CASE crn WHEN '12345' THEN '12000' ELSE '12001' END WHERE subject = 'CS'")
-        synced = self.probe("poll", section_count=53, mixed=True, title_variants=True, vary_enrollment=True)
-        self.assertEqual(synced["errors"], 0, synced)
-        self.assertEqual(synced["banner_calls"], [["CS", "202710"], ["IT", "202795"]])
+        self.scheduled_batch([(1, 53, 2), (2, 2, 1)], section_count=53, mixed=True, title_variants=True,
+                             vary_enrollment=True)
         before = self.snapshot()
         self.assertEqual(self.sql("SELECT title FROM Courses WHERE subject=? AND course_number=?", ["CS", "100"]),
                          [{"title": "Introduction"}], "lowest-CRN title survives the other 52 topic titles")
@@ -267,14 +369,15 @@ class PipelineTests(unittest.TestCase):
             # The browser deliberately expires every test session. Renew the
             # probe's real cookie through login, reusing its existing account.
             self.session_cookies = self.probe("authenticate", register=False)["cookies"]
-        changed = self.probe("poll", section_count=53, status="CLOSED", enrolled=29, title_variants=True)
-        self.assertEqual(changed["errors"], 0, changed)
+        self.scheduled_batch([(1, 53, 35), (2, 2, 1)], section_count=53, status="CLOSED", enrolled=29,
+                             title_variants=True)
         after = self.probe("search", queries=[query])[0]["body"]
         self.assertTrue(all(row["status"] == "CLOSED" and row["now"] == 29 for row in after["sections"]))
         self.assertEqual(after["pagination"]["total"], 53)
         self.assertEqual(self.sql("SELECT id,crn FROM Sections ORDER BY id"),
                          [{"id": row["id"], "crn": row["crn"]} for row in before["Sections"]])
-        self.assertEqual(self.probe("poll", section_count=53, status="CLOSED", enrolled=29, title_variants=True)["errors"], 0)
+        self.scheduled_batch([(1, 53, 0), (2, 2, 0)], section_count=53, status="CLOSED", enrolled=29,
+                             title_variants=True)
         self.assertEqual(len(self.snapshot()["Sections"]), len(before["Sections"]))
 
     def test_local_catalog_options_follow_searchable_pairs_without_writes(self):
@@ -306,18 +409,29 @@ class PipelineTests(unittest.TestCase):
 
     def test_banner_failure_preserves_all_records_and_sync_times(self):
         self.seed_watchlists()
-        self.assertEqual(self.probe("poll")["errors"], 0)
+        self.scheduled_batch(INITIAL_COUNTS)
         self.age_timestamps()
         before = self.snapshot()
-        result = self.probe("poll", banner_failure=True)
-        self.assertEqual(result["errors"], 2, result)
+        result = self.scheduled_batch(banner_failure=True)
+        self.assertEqual(result["submit_attempts"], [])
+        self.assertEqual(result["submissions"], [])
+        self.assertEqual(result["errors"], [
+            f"watched synchronization failed for {subject} {term}: Fixture Banner service unavailable"
+            for subject, term in WATCHED_PAIRS
+        ])
         self.assertEqual(self.snapshot(), before)
 
-    def test_scheduler_regular_syncs_two_terms_and_does_not_treat_explicit_targets_as_watched(self):
+    def test_scheduler_regular_syncs_two_terms_without_watches(self):
         priority = self.probe("scheduled", departments=["IT"], terms=["202710", "202795"], kind="watched")
-        self.assertEqual(priority["banner_calls"], [])  # backend has explicit IT / 202795
+        self.assertEqual(priority["banner_calls"], [])
+        self.assertEqual(priority["submit_attempts"], [])
+        self.assertEqual(priority["errors"], [])
+        self.assertEqual(self.snapshot()["DepartmentSyncs"], [])
         regular = self.probe("scheduled", departments=["IT", "CS"], terms=["202710", "202795"])
-        self.assertEqual(regular, {"banner_calls": [["IT", "202710"], ["IT", "202795"]], "next_subject": "CS"})
+        self.assertEqual(regular["banner_calls"], [["IT", "202710"], ["IT", "202795"]])
+        self.assertEqual(regular["submit_attempts"], regular["banner_calls"])
+        self.assertEqual(regular["errors"], [])
+        self.assertEqual(regular["next_subject"], "CS")
         self.assertEqual(self.sql("SELECT subject,term FROM DepartmentSyncs ORDER BY term"),
                          [{"subject": "IT", "term": "202710"}, {"subject": "IT", "term": "202795"}])
 
@@ -325,20 +439,26 @@ class PipelineTests(unittest.TestCase):
         self.seed_watchlists()
         regular = self.probe("scheduled", departments=["CS", "IT"], terms=["202710", "202795"])
         self.assertEqual(regular["banner_calls"], [["CS", "202795"]])
+        self.assertEqual(regular["submit_attempts"], regular["banner_calls"])
+        self.assertEqual(regular["errors"], [])
         priority = self.probe("scheduled", departments=["CS", "IT"], terms=["202710", "202795"], kind="watched")
-        self.assertEqual(priority["banner_calls"], [["CS", "202710"], ["IT", "202795"]])
+        self.assertEqual(priority["banner_calls"], WATCHED_PAIRS)
+        self.assertEqual(priority["submit_attempts"], WATCHED_PAIRS)
+        self.assertEqual(priority["errors"], [])
+        self.assertEqual(self.sql("SELECT subject,term FROM DepartmentSyncs ORDER BY subject,term"), [
+            {"subject": "CS", "term": "202710"}, {"subject": "CS", "term": "202795"},
+            {"subject": "IT", "term": "202795"}])
         self.assertEqual(len(self.snapshot()["Watchlists"]), 4)
 
     def test_empty_sync_retains_rows_ids_watchlists_and_section_timestamps(self):
         self.seed_watchlists()
-        self.assertEqual(self.probe("poll")["errors"], 0)
+        self.scheduled_batch(INITIAL_COUNTS)
         # Exercise preservation of both activity states, not only default-active rows.
         self.sql("UPDATE Sections SET is_active=FALSE WHERE subject=? AND term=? AND crn=?",
                  ["CS", "202710", "12346"])
         self.age_timestamps()
         before = self.snapshot()
-        result = self.probe("poll", banner_fixture="empty")
-        self.assertEqual(result["errors"], 0, result)
+        self.scheduled_batch([(0, 0, 0), (0, 0, 0)], banner_fixture="empty")
         after = self.snapshot()
         for table in ("Courses", "Sections", "Watchlists"):
             self.assertEqual(after[table], before[table], table)
@@ -472,14 +592,28 @@ class PipelineTests(unittest.TestCase):
 
     def test_malformed_fixture_never_advances_completion(self):
         self.seed_watchlists()
-        self.assertEqual(self.probe("poll")["errors"], 0)
+        self.scheduled_batch(INITIAL_COUNTS)
         self.age_timestamps()
         before = self.snapshot()
-        for fixture in ("missing_table", "partial", "truncated", "invalid_envelope", "invalid_status",
-                        "unexpected_empty_markup"):
-            result = self.probe("poll", banner_fixture=fixture)
-            self.assertEqual(result["errors"], 2, (fixture, result))
-            self.assertEqual(self.snapshot(), before)
+        for fixture, field, reason, index in (
+            ("missing_table", "SECTIONS_TABLE", "missing_course_table", None),
+            ("partial", "SECTIONS_TABLE", "missing_course_table", None),
+            ("truncated", "SECTIONS_TABLE", "incomplete_markup", None),
+            ("invalid_envelope", "response", "invalid_envelope", None),
+            ("invalid_status", "status", "invalid_status", 0),
+            ("unexpected_empty_markup", "SECTIONS_TABLE", "missing_course_table", None),
+        ):
+            with self.subTest(fixture=fixture):
+                result = self.scheduled_batch(banner_fixture=fixture)
+                self.assertEqual(result["submit_attempts"], [])
+                self.assertEqual(result["submissions"], [])
+                diagnostic = json.dumps({"event": "banner_validation_failed", "field": field, "row_index": index,
+                                         "reason": reason})
+                self.assertEqual(result["errors"], [
+                    f"watched synchronization failed for {subject} {term}: {diagnostic}"
+                    for subject, term in WATCHED_PAIRS
+                ])
+                self.assertEqual(self.snapshot(), before)
 
     def test_synthetic_ds_section_title_variants_and_duplicate_crn_diagnostics(self):
         counts = self.probe("submit", subject="DS", term="202710", banner_fixture="valid")
@@ -502,7 +636,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_backend_failure_rolls_back_existing_and_new_records(self):
         self.seed_watchlists()
-        self.assertEqual(self.probe("poll")["errors"], 0)
+        self.scheduled_batch(INITIAL_COUNTS)
         self.age_timestamps()
         before = self.snapshot()
         self.sql("CREATE TRIGGER integration_fail_sync BEFORE INSERT ON DepartmentSyncs "
@@ -510,30 +644,24 @@ class PipelineTests(unittest.TestCase):
         try:
             # A new CS CRN omits the two stored ones. Failure at department
             # completion must roll back observed upserts while omitted rows stay intact.
-            result = self.probe("poll", status="CLOSED", section_count=1)
-            self.assertEqual(result["errors"], 2, result)
-            self.assertTrue(all("HTTP 503" in row for row in result["results"]), result)
+            result = self.scheduled_batch(status="CLOSED", section_count=1)
+            self.assertEqual(result["submit_attempts"], WATCHED_PAIRS)
+            self.assertEqual(result["submissions"], [])
+            self.assertEqual(result["errors"], [
+                f"watched synchronization failed for {subject} {term}: Department synchronization failed (HTTP 503)."
+                for subject, term in WATCHED_PAIRS
+            ])
             self.assertEqual(self.snapshot(), before)
             failed_insert = self.probe("submit", subject="ECE", term="202790")
             self.assertIn("HTTP 503", failed_insert["error"])
             self.assertEqual(self.snapshot(), before)
         finally:
             self.sql("DROP TRIGGER integration_fail_sync")
-        self.assertEqual(self.probe("poll", status="CLOSED", section_count=1)["errors"], 0)
+        self.scheduled_batch([(1, 1, 0), (2, 2, 2)], status="CLOSED", section_count=1)
         cs = self.sql("SELECT crn,is_active FROM Sections WHERE subject=? AND term=? ORDER BY crn",
                       ["CS", "202710"])
         self.assertEqual(cs, [{"crn": "12000", "is_active": 1}, {"crn": "12345", "is_active": 1},
                               {"crn": "12346", "is_active": 1}])
-
-    def test_actual_manual_checker_is_read_only(self):
-        self.seed_watchlists()
-        self.assertEqual(self.probe("poll")["errors"], 0)
-        self.age_timestamps()
-        before = self.snapshot()
-        result = self.probe("manual", status="CLOSED")
-        self.assertEqual(result["exit_code"], 0, result)
-        self.assertIn("read-only", result["output"])
-        self.assertEqual(self.snapshot(), before)
 
     def test_checker_has_no_database_credentials_imports_or_network_access(self):
         container = self.command("ps", "-q", "db").strip()
@@ -545,19 +673,24 @@ class PipelineTests(unittest.TestCase):
     def test_application_compose_environment(self):
         env = dict(os.environ, DB_PASSWORD="fixture-only-db", DB_ROOT_PASSWORD="fixture-only-root",
                    SESSION_SECRET="fixture-only-session-secret-0123456789", CHECKER_API_TOKEN="fixture-only-token",
-                   CHECKER_API_URL="http://backend:3000", CHECKER_TERMS='["202710"]', CHECKER_MONITORING_TARGETS='[{"subject":"IT","term":"202795"}]')
+                   CHECKER_API_URL="http://backend:3000", CHECKER_TERMS='["202710"]')
         result = subprocess.run(["docker", "compose", "--env-file", os.devnull, "-f", str(ROOT / "compose.yaml"),
                                  "config", "--format", "json"], env=env, check=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
         services = json.loads(result.stdout)["services"]
         checker = services["checker"]
+        backend_env = services["backend"]["environment"]
         self.assertFalse(any(key.startswith("DB_") for key in checker["environment"]))
         self.assertEqual(checker["environment"]["CHECKER_API_URL"], "http://backend:3000")
-        self.assertEqual(checker["environment"]["CHECKER_API_TOKEN"], services["backend"]["environment"]["CHECKER_API_TOKEN"])
+        self.assertEqual(checker["environment"]["CHECKER_API_TOKEN"], backend_env["CHECKER_API_TOKEN"])
+        self.assertEqual(json.loads(checker["environment"]["CHECKER_TERMS"]), ["202710"])
+        self.assertEqual(backend_env["SEARCH_TERMS"], checker["environment"]["CHECKER_TERMS"])
         self.assertEqual(checker["depends_on"]["backend"]["condition"], "service_healthy")
         self.assertNotIn("db", checker["depends_on"])
-        self.assertEqual(json.loads(services["backend"]["environment"]["CHECKER_MONITORING_TARGETS"]),
-                         [{"subject": "IT", "term": "202795"}])
+        integration = json.loads(self.command("config", "--format", "json"))["services"]
+        for service in (*services.values(), *integration.values()):
+            self.assertNotIn("CHECKER_MONITORING_TARGETS", service.get("environment", {}))
+            self.assertNotIn("DISCORD_WEBHOOK_URL", service.get("environment", {}))
         # Run the existing HTTPS/cookie smoke test against this test-owned DB.
         # Its production environment changes apply only to the child process.
         output = self.command("exec", "-T", "backend", "node",

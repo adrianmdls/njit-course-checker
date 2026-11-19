@@ -1,118 +1,115 @@
 # Operations
 
-Run commands from the repository root. See the [root guide](../README.md) for
-installation, monitoring targets, and legacy-database upgrades, and the
-[backend guide](../backend/README.md) for API/configuration details.
+Run commands from the repository root with the local environment configured as
+shown in the [README](../README.md#quick-start).
 
-## Routine commands
-
-```sh
-docker compose ps                    # Service status
-docker compose logs -f               # Follow service output; Ctrl+C stops following
-docker compose stop                 # Stop without removing containers
-docker compose start                # Start existing containers
-docker compose restart              # Restart without applying changed configuration
-docker compose up -d --build --wait  # Rebuild/recreate after code or configuration changes
-docker compose down                 # Remove containers and networks; retain database volume
-```
-
-MariaDB persists in a named volume. Checker activity is logged to
-`data/checker.log`, mounted from the host. Do not use `docker compose down -v`
-unless you intend to delete the database. The current checker does not write
-`state.json` or `notification.log`.
-
-## Monitoring and manual checks
-
-Regular synchronization rotates one NJIT subject at :00 and :30 for the one or
-two terms in `CHECKER_TERMS`. Priority synchronization reads actual Watchlists
-at :05/:15/:25/:35/:45/:55, filtered to the same configured terms and allowlist.
-Browser Add/Remove now persist the authenticated user's database Watchlists.
-The existing watched-only endpoint promotes/demotes distinct pairs across all
-users; the scheduler retains its configured-term and NJIT allowlist filters.
-Backend explicit
-`CHECKER_MONITORING_TARGETS` remains available to legacy/manual callers but does
-not grant scheduled priority. `CHECK_INTERVAL` is retired.
-
-`BANNER_REQUEST_DELAY` is at least 5 seconds, measured from Banner completion to
-the next start. Both loops share one fetch/parse/submit gate; due regular work has priority
-between watched requests. Active batches
-finish; missed ticks are skipped. Term or delay changes require a later checker
-recreation; no running application containers were recreated during Phase 2.
-See [Phase 2](phase-2-sync.md) for configuration and scheduling details.
-
-Keep `data/rotation.json` across restarts. It records the next subject and last
-completed regular slot; interrupted department slots keep the previous cursor.
-Do not delete it to troubleshoot a request failure. A corrupt/unreadable cursor
-halts scheduling, preserves the original file and leaves the process alive to
-avoid automatic restart loops. Follow the documented
-[cursor recovery procedure](phase-2-sync.md#cursor-recovery). A second checker sharing this directory
-is refused through `data/checker.lock`; separate data directories are not a
-cross-host singleton mechanism. No database migration is needed.
-
-The supported read-only manual command is:
+## Running the stack
 
 ```sh
-docker compose exec checker manual_check
+docker compose up -d --build --wait
+docker compose ps
+docker compose logs --tail=100 backend db
+tail -f data/checker.log
 ```
 
-Run it only while the automated checker is stopped to avoid independent Banner
-requests. It retrieves legacy monitored departments from Express, fetches Banner, and prints
-department summaries without submitting snapshots, changing database records,
-or sending notifications. If the checker is stopped, use
-`docker compose run --rm --no-deps checker manual_check` with the backend running.
-For one-shot synchronization and deterministic verification, use the
-[smoke-test guide](banner-smoke-test.md); run only one synchronization producer.
+Use `docker compose stop` to pause the stack, `docker compose start` to resume it,
+or `docker compose down` to remove its containers and networks while keeping the
+database. Run `docker compose up -d --build --wait` again after changing settings
+in `.env`. A restart reuses the existing container configuration.
 
-Authenticated search reads synchronized MariaDB records. Searching an
-unsynchronized department/term returns an empty list and never triggers Banner.
-The UI loads available terms and departments from `/api/courses/options`, chooses
-the first configured term initially, and shows only departments available for the
-selected term. Select a department before searching; there is no all-department
-search. Changing terms clears an unavailable department selection. Changing the
-term or department clears results and prevents delayed responses from restoring
-the previous search; other filters are preserved.
-Catalog options and searches never initiate synchronization. If no local catalog
-data exists, the form explains this and disables search. Reopen the search tab
-after a synchronization to refresh its options. Compose maps backend SEARCH_TERMS
-to CHECKER_TERMS. Configured terms remain visible
-even before ingestion; their department selection and search stay disabled until
-active linked catalog records exist. Historical terms are excluded from dropdown
-options, but their rows and watches remain intact and direct searches still work.
-Standalone backend users should set SEARCH_TERMS explicitly to use this policy.
+```sh
+curl -fsS http://localhost:8080/api/health
+```
 
-Synchronization preserves omitted sections exactly. A structurally valid Banner
-response can still be incomplete, so omission no longer marks a section inactive.
-Only explicit observations update/reactivate sections and their last-seen times.
-Historical OPEN/CLOSED/CANCELLED values may be stale; department completion is not
-proof that every stored section was observed. Existing inactive rows stay inactive
-until observed again. See [section preservation](section-activity.md). No schema
-change or automatic repair of historical activity flags accompanies this safeguard.
+A healthy response means Express can query MariaDB. Check `data/checker.log`
+after a scheduled slot to see whether the checker has fetched and saved sections.
+Use `docker compose logs checker` if the checker fails before its log is available.
+
+MariaDB uses the named `mariadb_data` volume. **`docker compose down -v` deletes
+that volume and its data.** Keep `data/` too. It holds the checker's logs and
+rotation cursor. Back up the database and follow the
+[existing-volume migration instructions](../backend/README.md#database-and-migrations)
+before applying schema changes.
+
+## Scheduling and monitoring
+
+The Compose checker uses New York time. At :00 and :30 it takes the next subject
+from [the department list](../src/departments.json) and checks each configured
+term, skipping exact department/term pairs that are watched. At :05, :15, :25,
+:35, :45, and :55 it checks watched pairs that match the configured terms and
+department list. Multiple watches on the same pair produce one priority check.
+When the last watch is removed, the pair returns to regular rotation. The checker
+rechecks watch membership before each fetch.
+
+Both schedules take turns fetching, parsing, and submitting snapshots. Due
+regular work has priority between watched requests. `BANNER_REQUEST_DELAY` sets
+the minimum pause from the end of a Banner request, including failures, to the
+start of the next. The default and minimum are five seconds. A full regular
+rotation takes about 41 hours when no slots are missed. Slow or large batches
+can run past the next tick. Missed ticks are skipped.
+
+### If data stops updating
+
+1. Check `docker compose ps` and `data/checker.log`. Look for the subject, term,
+   and whether the failure came from Banner, validation, or the backend.
+2. For an API connection failure, check the base URL, DNS, and TLS configuration.
+   For HTTP `401`, check that the checker and backend have the same token.
+   A `503` can mean the token is unset on the backend or that MariaDB is
+   unavailable. Check the backend health response and service logs. See the
+   [deployment checks](banner-smoke-test.md#deployment-network-and-tls).
+3. If a watched pair is missing from priority checks, confirm the watch was
+   saved, the term is in `CHECKER_TERMS`, and the subject is in the department
+   list. With no watched pairs, expect activity on the half-hour schedule only.
+
+A regular slot advances the cursor once it has handled its terms, even if a
+request fails or both terms were skipped. Use the log to confirm a successful
+sync. A submission timeout can leave the result uncertain if Express commits
+after the checker stops waiting. An accepted snapshot updates department
+completion, while a section's last-seen time changes only when it appears in
+the response. See [section activity](section-activity.md).
+
+### Cursor and lock recovery
+
+Keep `data/rotation.json` through restarts. It stores the next subject and last
+handled regular slot. An interruption before the cursor is saved leaves the
+previous position available for another attempt. A corrupt or unreadable cursor
+halts scheduling, preserves the file, and can leave the container showing `Up`.
+Look for `Scheduler halted` in `data/checker.log`.
+
+1. Run `docker compose stop checker` before editing the cursor. Save an exact
+   copy of `data/rotation.json` under a different filename and check storage
+   permissions.
+2. Restore a known-good backup if possible. If you need to reconstruct the
+   cursor, set `next_subject` to a code in `src/departments.json` and
+   `last_slot` to a known completed slot's timestamp. Use a nonnegative Unix
+   timestamp divisible by 1800. If the last slot is unknown, `0` is a valid
+   checkpoint and can repeat some work.
+3. Validate and save the replacement JSON in a separate file in `data/`, then
+   rename it over `data/rotation.json`. Keep the backup. Run
+   `docker compose start checker` and watch the log through the next regular
+   slot. Cursor repair does not require a database reset or migration.
+
+A running checker holds an advisory lock on `data/checker.lock`. If another
+checker reports that the directory is in use, stop the extra process. The file
+can stay after exit because the OS releases the lock when the process exits.
+Deleting it while a checker is running can let another process take a lock on
+a new file. Use a single producer across hosts and data directories as well.
 
 ## Banner term codes
 
-The first four digits identify the year:
+Set `CHECKER_TERMS` in `.env` to a JSON array of one or two distinct six-digit
+strings, such as `CHECKER_TERMS='["202690","202710"]'`. Choose the terms you want
+to monitor. The checker has no automatic term discovery.
 
 | Suffix | Term | Example |
 |---|---|---|
-| `10` | Spring | `202710` = Spring 2027 |
-| `50` | Summer | `202750` = Summer 2027 |
-| `90` | Fall | `202690` = Fall 2026 |
-| `95` | Winter | `202695` = Winter 2026–2027 |
+| `10` | Spring | `202710` is Spring 2027 |
+| `50` | Summer | `202750` is Summer 2027 |
+| `90` | Fall | `202690` is Fall 2026 |
+| `95` | Winter | `202695` is Winter 2026–2027 |
 
-Use the appropriate real term when configuring monitoring; examples are not
-automatically active targets.
-
-## Notifications
-
-Automatic Discord and email notifications are inactive. The dashboard provides
-no notification toggle. The retained Discord utility can still
-send a manual message when `DISCORD_WEBHOOK_URL` is configured in the checker:
-
-```sh
-docker compose exec checker python -c \
-  'from src.discord_notify import send_discord_notification; print(send_discord_notification("NJIT Course Checker: Test notification"))'
-```
-
-It returns `True` on success and `False` when disabled or unsuccessful. Recreate
-the checker after changing the webhook setting. This manual command sends an
-actual message; it is not part of automated verification.
+Term changes affect the checker and the search dropdown after Compose recreates
+the services. Historical records and watches remain stored. A new term may have
+no departments in search until the checker saves some active sections for it.
+Reopen the search tab after a sync to refresh the options. See
+[backend configuration](../backend/README.md#configuration) for standalone use.

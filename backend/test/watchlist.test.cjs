@@ -37,7 +37,6 @@ async function serve(pool, environment = 'development') {
   process.env.APP_ENV = environment;
   process.env.APP_ORIGIN = environment === 'production' ? 'https://example.invalid' : 'http://localhost:8080';
   process.env.SESSION_SECRET = secret;
-  process.env.CHECKER_MONITORING_TARGETS = '[]';
   const auth = await createAuth(pool);
   const app = express();
   app.use('/api/auth', auth.router);

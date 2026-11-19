@@ -2,16 +2,21 @@
 // Chrome/Chromium and Docker are required; no browser framework is installed.
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { readdirSync, readFileSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, isAbsolute, join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 
 const origin = process.argv[2]
 assert.match(origin, /^http:\/\/127\.0\.0\.1:\d+$/)
-assert.ok(process.env.INTEGRATION_BACKEND_CONTAINER)
-const profile = await mkdtemp(join(tmpdir(), 'njit-course-search-'))
+const { backendContainer, profile } = JSON.parse(readFileSync(0, 'utf8'))
+assert.match(backendContainer, /^[a-f0-9]{64}$/)
+assert.ok(typeof profile === 'string' && isAbsolute(profile) && basename(profile).startsWith('njit-browser-test-')
+  && readdirSync(profile).length === 0, 'The pipeline must supply a new browser profile directory')
 const chrome = spawn(process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  ['--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+  ['--headless', '--disable-gpu', '--disable-breakpad', '--disable-crash-reporter',
+    '--no-first-run', '--no-default-browser-check',
     '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'])
 let ws
 try {
@@ -348,7 +353,7 @@ try {
   // Fixture-only activity changes exercise the real watchlist UI; transactional
   // omission/reactivation is independently covered by the API lifecycle test.
   const sectionId = unfiltered.sections[0].id
-  const setActivity = active => execFileSync('docker', ['exec', process.env.INTEGRATION_BACKEND_CONTAINER, 'node', '-e',
+  const setActivity = active => execFileSync('docker', ['exec', backendContainer, 'node', '-e',
     "const pool=require('./src/db'); pool.execute('UPDATE Sections SET is_active=? WHERE id=?',JSON.parse(process.argv[1])).finally(()=>pool.end())",
     JSON.stringify([active, sectionId])], { timeout: 15000 })
   try {
@@ -416,7 +421,7 @@ try {
   await send('Page.reload')
   await waitFor(`location.pathname==='/dashboard' && document.body.textContent.includes('Your watchlist is empty.')`)
   // Expire the actual database session; leave its signed browser cookie intact.
-  execFileSync('docker', ['exec', process.env.INTEGRATION_BACKEND_CONTAINER, 'node', '-e',
+  execFileSync('docker', ['exec', backendContainer, 'node', '-e',
     "const pool=require('./src/db'); pool.query('UPDATE sessions SET expires=1').finally(()=>pool.end())"], { timeout: 15000 })
   // Search and watchlist loading both retain session-expiry handling.
   await evaluate(`button('Search Courses').click()`)
@@ -427,10 +432,13 @@ try {
   }
 } finally {
   ws?.close()
-  if (chrome.pid && chrome.exitCode === null) {
+  if (chrome.pid && chrome.exitCode === null && chrome.signalCode === null) {
     const exited = new Promise(resolve => chrome.once('exit', resolve))
     chrome.kill('SIGTERM')
-    await exited
+    await Promise.race([exited, delay(5000, undefined, { ref: false })])
+    if (chrome.exitCode === null && chrome.signalCode === null) {
+      chrome.kill('SIGKILL')
+      await exited
+    }
   }
-  await rm(profile, { recursive: true, force: true })
 }

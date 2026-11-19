@@ -5,15 +5,15 @@ per-user watchlists. Search reads `/api/courses`; Add and Remove use
 `/api/watchlist`, and the dashboard reloads stored watches on mount/tab changes.
 Section IDs distinguish matching CRNs in different terms. Loading, retryable
 errors and pending controls prevent duplicate clicks. Status comes from the
-stored section, including Closed/Cancelled/unknown states. Notification controls
-are not implemented. See the [root guide](../README.md) for
+stored section, including Closed/Cancelled/unknown states. The Watchlist shows a
+disabled email notification control. See the [root guide](../README.md) for
 Compose setup and [backend guide](../backend/README.md) for the API contract.
 
-Search requires a term and an explicitly selected department. Options come from
-`/api/courses/options`, which includes only departments with active, linked
-sections for that term. Changing terms preserves the department only when it is
-available in the new term. Term and department changes clear results and cancel
-outdated requests while preserving the other filters.
+Search requires a term and an explicitly selected department. In Compose,
+`/api/courses/options` lists the configured terms and any departments with
+active, linked sections for each term. Changing terms preserves the department
+only when it is available in the new term. Term and department changes clear
+results and cancel outdated requests while preserving the other filters.
 
 ## Development
 

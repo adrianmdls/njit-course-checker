@@ -12,7 +12,6 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET}
       CHECKER_API_TOKEN: ${CHECKER_API_TOKEN:-}
       SEARCH_TERMS: ${CHECKER_TERMS:?Set CHECKER_TERMS to a JSON array of one or two terms}
-      CHECKER_MONITORING_TARGETS: ${CHECKER_MONITORING_TARGETS:-[]}
       PORT: 3000
       DB_HOST: db
       DB_PORT: 3306
@@ -55,7 +54,6 @@ services:
     environment:
       CHECKER_TERMS: ${CHECKER_TERMS:?Set CHECKER_TERMS to a JSON array of one or two terms}
       BANNER_REQUEST_DELAY: ${BANNER_REQUEST_DELAY:-5}
-      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       CHECKER_API_URL: ${CHECKER_API_URL:-http://backend:3000}
       CHECKER_API_TOKEN: ${CHECKER_API_TOKEN:-}
       TZ: America/New_York

@@ -1,9 +1,13 @@
-"""Offline checks of disposable-probe authentication; no Docker, HTTP or SQL."""
+"""Offline checks of the disposable probe; no Docker, HTTP or SQL."""
+import fcntl
 import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -24,6 +28,113 @@ pipeline = load_probe_module("probe_pipeline", "test_pipeline.py")
 probe = load_probe_module("checker_probe_auth", "checker_probe.py")
 
 
+class BrowserCleanupTests(unittest.TestCase):
+    child = """
+import fcntl, signal, sys, time
+from pathlib import Path
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+with open(sys.argv[1], 'w') as lease:
+    fcntl.flock(lease, fcntl.LOCK_EX)
+    Path(sys.argv[2]).touch()
+    time.sleep(10)
+"""
+    helper = """
+import json, subprocess, sys, time
+from pathlib import Path
+
+work = Path(sys.argv[1])
+profile = Path(json.load(sys.stdin)['profile'])
+(work / 'profile').write_text(str(profile))
+(profile / 'chrome-data').touch()
+subprocess.Popen([sys.executable, '-B', '-c', sys.argv[3], str(work / 'lease'), str(work / 'ready')],
+                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+while not (work / 'ready').exists():
+    time.sleep(0.01)
+print('browser started', flush=True)
+if sys.argv[2] == 'timeout':
+    time.sleep(30)
+sys.exit(int(sys.argv[2]))
+"""
+
+    def check_cleanup(self, outcome):
+        with tempfile.TemporaryDirectory() as work:
+            command = [sys.executable, "-B", "-c", self.helper, work, outcome, self.child]
+            if outcome == "timeout":
+                with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                    pipeline.run_browser(command, {}, timeout=2, terminate_grace=0.05)
+                self.assertIn(b"browser started", raised.exception.output)
+            else:
+                result = pipeline.run_browser(command, {}, timeout=5)
+                self.assertEqual(result.returncode, int(outcome), result.stdout)
+                self.assertIn("browser started", result.stdout)
+
+            work = Path(work)
+            self.assertFalse(Path((work / "profile").read_text()).exists())
+            # An open lock identifies a live descendant even on systems where
+            # an orphaned child's PID remains visible temporarily as a zombie.
+            deadline = time.monotonic() + 2
+            with (work / "lease").open() as lease:
+                while True:
+                    try:
+                        fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        if time.monotonic() >= deadline:
+                            self.fail("browser descendant survived cleanup")
+                        time.sleep(0.01)
+
+    def test_profile_and_descendant_cleanup_on_success(self):
+        self.check_cleanup("0")
+
+    def test_profile_and_descendant_cleanup_on_failure(self):
+        self.check_cleanup("7")
+
+    def test_cleanup_when_the_helper_is_the_last_process_to_exit(self):
+        command = [sys.executable, "-B", "-c", "import json, sys; print(json.load(sys.stdin)['profile'])"]
+        result = pipeline.run_browser(command, {}, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(Path(result.stdout.strip()).exists())
+
+    def test_timeout_escalates_for_a_descendant_that_ignores_sigterm(self):
+        self.check_cleanup("timeout")
+
+
+class ScheduledBatchTests(unittest.TestCase):
+    def test_batch_observes_a_sanitized_submission_failure_and_continues(self):
+        def response(status, body):
+            result = requests.Response()
+            result.status_code = status
+            result.url = "http://test.invalid/private-fixture-url"
+            result._content = json.dumps(body).encode()
+            return result
+
+        targets = response(200, {"targets": [
+            {"subject": subject, "term": term} for subject, term in pipeline.WATCHED_PAIRS
+        ]})
+        failure = response(503, {"error": "private fixture response"})
+        counts = {"courses": 2, "sections": 2, "status_changes": 0}
+        handlers = list(probe.checker.logger.handlers)
+        responses = [targets, targets, failure, targets, response(200, counts)]
+        with (
+            patch.dict(os.environ, {"CHECKER_API_URL": "http://test.invalid", "CHECKER_API_TOKEN": "test-token"}, clear=True),
+            patch.object(requests, "request", side_effect=responses) as http,
+        ):
+            result = probe.run({"mode": "scheduled_batch"})
+        self.assertEqual(probe.checker.logger.handlers, handlers)
+        self.assertEqual(result["banner_calls"], pipeline.WATCHED_PAIRS)
+        self.assertEqual(result["submit_attempts"], pipeline.WATCHED_PAIRS)
+        self.assertEqual(result["submissions"], [{"subject": "IT", "term": "202795", **counts}])
+        self.assertEqual(result["errors"], [
+            "watched synchronization failed for CS 202710: Department synchronization failed (HTTP 503)."
+        ])
+        posts = [call.kwargs["json"] for call in http.call_args_list if call.args[0] == "POST"]
+        self.assertEqual([(post["subject"], post["term"]) for post in posts],
+                         [tuple(pair) for pair in pipeline.WATCHED_PAIRS])
+        self.assertEqual([[section["crn"] for section in post["sections"]] for post in posts],
+                         [["12345", "12346"], ["54321", "54322"]])
+
+
 class ProbeAuthenticationTests(unittest.TestCase):
     def test_spring_fixture_has_distinct_section_titles_and_a_stable_lowest_crn(self):
         sections = probe.parse_all_sections(probe.banner("CS", section_count=53, mixed=True,
@@ -37,7 +148,7 @@ class ProbeAuthenticationTests(unittest.TestCase):
         self.assertEqual(min(sections, key=lambda row: row["crn"])["title"], "CS 100 - Introduction")
 
     def make_pipeline(self):
-        case = pipeline.PipelineTests("test_configured_and_watched_targets_merge")
+        case = pipeline.PipelineTests("test_watched_targets_deduplicate_and_demote")
         case.sql = Mock()
         case.setUp()
         payloads = []

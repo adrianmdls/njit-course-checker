@@ -19,9 +19,5 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy the application source code
 COPY src/ ./src/
 
-# Copy manual_check script and make it executable
-COPY manual_check /usr/local/bin/manual_check
-RUN chmod +x /usr/local/bin/manual_check
-
 # Start the automated checker
 CMD ["python", "-u", "-m", "src.checker"]

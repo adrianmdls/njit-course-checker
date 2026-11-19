@@ -1,5 +1,11 @@
 # Phase 1: Banner synchronization stabilization
 
+> Historical record from November 17, 2026. The single-CRN parser wrapper and
+> standalone department-sync helper were retired in the repository cleanup.
+> Current ingestion accepts different titles on distinct CRNs and rejects
+> conflicting duplicate CRNs with `crn` / `conflicting_crn`. See the
+> [current ingestion contract](../backend/README.md#internal-department-synchronization).
+
 Implemented on `feature/scheduled-course-sync`, based on `multi-container`.
 `feature/persistent-watchlists` is preserved separately. No experimental refresh
 services or snapshot-generation logic have been imported.
@@ -47,8 +53,9 @@ paired section tables and complete 13-cell data rows. Complete 13-cell `th`
 header rows are allowed. Course whitespace is normalized; status is uppercased.
 Unsupported rows, extra/unmatched tables or rows, missing tables, truncated tags,
 HTML documents, forms and scripts fail the entire response. No records are
-submitted from a partially parsed response. Individual CRN lookups use the same
-strict parser.
+submitted from a partially parsed response. Phase 1 also used this parser for
+individual CRN lookups via a wrapper that was later removed during repository
+cleanup.
 
 The empty contract is proven by offline fixtures, **not a live observation of
 Banner during this phase**. Nonempty envelopes containing empty HTML, header-only

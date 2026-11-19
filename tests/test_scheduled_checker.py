@@ -99,6 +99,17 @@ class ScheduledCheckerTests(unittest.TestCase):
         self.assertEqual(self.submit.call_count, 2)
         self.targets.assert_called_with(watched_only=True)
 
+    def test_no_watches_skip_priority_work_and_leave_regular_rotation_enabled(self):
+        self.at(300)
+        self.scheduler.run_slot('watched', 300)
+        self.fetch.assert_not_called()
+        self.submit.assert_not_called()
+        self.assertEqual(self.scheduler.cursor.next_subject, 'CS')
+        self.at(1800)
+        self.scheduler.run_slot('regular', 1800)
+        self.assertEqual([call.args for call in self.submit.call_args_list], [('CS', term, []) for term in TERMS])
+        self.assertEqual(self.scheduler.cursor.next_subject, 'IT')
+
     def test_both_watched_terms_still_advance_rotation_once(self):
         self.watched = [{'subject': 'CS', 'term': term} for term in TERMS]
         self.scheduler.run_slot('regular', 0)
@@ -157,10 +168,12 @@ class ScheduledCheckerTests(unittest.TestCase):
 
     def test_targets_api_failure_does_not_guess_membership_or_fetch_banner(self):
         self.targets.side_effect = requests.ConnectionError('fixture failure')
-        with self.assertLogs(checker.logger):
+        with self.assertLogs(checker.logger) as logs:
             self.scheduler.run_slot('regular', 0)
             self.scheduler.run_slot('watched', 300)
         self.fetch.assert_not_called()
+        self.submit.assert_not_called()
+        self.assertIn('Could not load watched targets: fixture failure', logs.records[-1].getMessage())
         self.assertEqual(self.scheduler.cursor.next_subject, 'IT')
 
     def test_empty_success_malformed_failure_and_failed_submission(self):

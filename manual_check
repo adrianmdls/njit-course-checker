@@ -1,3 +1,0 @@
-#!/bin/sh
-cd /app || exit 1
-exec python -m src.manual_check

@@ -1,5 +1,11 @@
 # Phase 2: round-robin synchronization
 
+> Historical record. The manual checker, standalone synchronization command,
+> and explicit monitoring targets were retired on November 19, 2026. Both
+> target endpoint forms now return watches. Phase 3 replaced the demo Add
+> and Remove controls with [persistent watchlists](phase-3-watchlists.md).
+> See [current operations](operations.md#scheduling-and-monitoring).
+
 The checker now has two independent scheduling threads inside its existing
 process. There are no new services, dependencies, queues, database tables or
 migrations. Phase 1 parsing and Express transactional upserts remain intact.
@@ -131,6 +137,8 @@ rewinding it. There is no automatic cursor reset or migration.
 
 ## Cursor recovery
 
+Follow the [current cursor and lock recovery steps](operations.md#cursor-and-lock-recovery).
+
 An unreadable/invalid cursor or unknown next subject raises a dedicated state
 error. Before starting scheduling threads, the checker logs **Scheduler halted**
 with this recovery path and retains the process lock. It then stays alive without
@@ -140,34 +148,9 @@ never overwritten, renamed or deleted automatically. A halted container can
 still appear `Up`; inspect `data/checker.log`. There is no automatic reload after
 editing the file.
 
-Recovery is an explicit operator action, not something performed by tests or
-this implementation run:
-
-1. Stop only the checker (`docker compose stop checker`) before editing state.
-2. Copy `data/rotation.json` to a uniquely named diagnostic backup, preserving
-   its exact contents; inspect the log and fix any storage/permissions problem.
-   Do not remove the invalid file without preserving that evidence first.
-3. Prefer restoring a verified cursor backup. Otherwise explicitly choose the
-   department to retry from `src/departments.json` and reconstruct valid JSON in
-   a separate file in `data/`. `next_subject` must be a current allowlist code;
-   `last_slot` must be a nonnegative integer Unix timestamp divisible by 1800,
-   representing a known completed slot. If the completion time is unknown, an
-   operator may deliberately use `0` as a conservative older checkpoint with
-   their chosen subject. This is a manual recovery choice, not an automatic
-   reset or a claimed historical completion time.
-4. Validate that JSON and its selected subject, flush it to disk, then atomically
-   rename the replacement over `data/rotation.json`. Keep the diagnostic backup.
-5. Start only the checker (`docker compose start checker`) and verify the halt
-   no longer appears and regular processing resumes at its next scheduled tick.
-   Do not reset MariaDB or rerun migrations. Repeated ingestion is safe, although
-   an old backup can cause some department work to repeat.
-
-`data/checker.lock` is held through a POSIX advisory file lock for the lifetime
-of the checker. A second checker sharing that directory fails startup. Stale
-lock-file contents do not hold a lock after process exit. Separate directories
-or hosts are not protected by this lock: deploy only one checker. Standalone
-`manual_check`, `department_sync` and legacy Python search commands are outside
-this process's serialization mechanism and must not run concurrently with it.
+At this stage, `manual_check`, the standalone `department_sync` helper, and
+legacy Python search ran outside the scheduler's lock. Those tools were retired
+in the repository cleanup.
 
 ## Files and deterministic validation
 
