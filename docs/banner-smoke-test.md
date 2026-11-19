@@ -15,8 +15,10 @@ RUN_BROWSER_TESTS=1 python3 -B tests/integration/test_pipeline.py
 ```
 
 The runner builds the existing application Dockerfiles, creates a randomly named
-test project, and removes it on completion. MariaDB data lives in tmpfs. No host
-database/backend ports, application `.env`, production volumes, or production records are used.
+test project, and removes it on completion. MariaDB data lives in tmpfs. The
+browser run keeps its project-owned tmpfs volume mounted through a network-disabled
+container so the same MariaDB data survives a stop/start.
+No host database/backend ports, application `.env`, production volumes, or production records are used.
 The frontend publishes one temporary loopback port; the runner selects it and
 sets the matching test-only `APP_ORIGIN`. Nginx forwards real `/api/` requests.
 The checker has no DB credentials and shares no network with MariaDB; tests also
@@ -45,8 +47,19 @@ An additional catalog-options test covers empty catalogs, deduplicated local
 term/subject pairs (including ECE and Winter), exclusion of unlinked sections
 and unscheduled courses, authentication and read-only behavior.
 
-`RUN_BROWSER_TESTS=1` requires host Node >=24 and Chrome/Chromium. Set `CHROME_BIN`
-to its executable on systems other than macOS. The dependency-free Chrome
+`RUN_BROWSER_TESTS=1` requires host Node >=24, Chrome/Chromium, and Docker Compose
+with support for the `!reset` override tag. Set `CHROME_BIN`
+to the browser executable if needed. The authentication lifecycle scenario
+checks session continuity across a backend restart and a MariaDB stop/start,
+both endpoints' outage responses, and login and registration rate limits.
+Run the authentication scenario on its own with the focused test command.
+
+```sh
+RUN_BROWSER_TESTS=1 python3 -B tests/integration/test_pipeline.py \
+  PipelineTests.test_disposable_authentication_browser_lifecycle
+```
+
+The dependency-free Chrome
 DevTools helper does **not** mock fetch: it logs in via React, inspects actual
 search parameters, renders synchronized records and statuses, tests pagination,
 persistent Add/reload/Remove, duplicate clicks, retryable watchlist failures,

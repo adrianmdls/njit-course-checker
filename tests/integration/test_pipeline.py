@@ -15,6 +15,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = ROOT / "tests" / "integration" / "compose.yaml"
+AUTH_COMPOSE = COMPOSE.with_name("auth-compose.yaml")
 SQL = """const pool = require('./src/db');
 pool.execute(process.argv[1], JSON.parse(process.argv[2]))
   .then(([rows]) => process.stdout.write(JSON.stringify(rows)))
@@ -39,8 +40,10 @@ class PipelineTests(unittest.TestCase):
             listener.bind(("127.0.0.1", 0))
             cls.http_port = listener.getsockname()[1]
         cls.environment = dict(os.environ, INTEGRATION_HTTP_PORT=str(cls.http_port))
-        cls.compose = ["docker", "compose", "--env-file", os.devnull,
-                       "-p", f"njit-banner-test-{uuid.uuid4().hex[:10]}", "-f", str(COMPOSE)]
+        cls.project = f"njit-banner-test-{uuid.uuid4().hex[:10]}"
+        cls.compose = ["docker", "compose", "--env-file", os.devnull, "-p", cls.project, "-f", str(COMPOSE)]
+        if os.environ.get("RUN_BROWSER_TESTS") == "1":
+            cls.compose.extend(["-f", str(AUTH_COMPOSE)])
         cls.addClassCleanup(cls.cleanup)
         print("Building disposable integration stack...", flush=True)
         cls.command("build", "backend", "checker-test", "frontend")
@@ -77,6 +80,19 @@ class PipelineTests(unittest.TestCase):
         self.session_cookies = None
         for table in ("Watchlists", "Sections", "Courses", "Users", "DepartmentSyncs", "sessions"):
             self.sql(f"DELETE FROM {table}")
+
+    @unittest.skipUnless(os.environ.get("RUN_BROWSER_TESTS") == "1", "Set RUN_BROWSER_TESTS=1 to run Chrome")
+    def test_disposable_authentication_browser_lifecycle(self):
+        identity = {
+            "project": self.project,
+            "origin": f"http://127.0.0.1:{self.http_port}",
+            "containers": {service: self.command("ps", "-a", "-q", service).strip()
+                           for service in ("backend", "db", "frontend", "db-storage")},
+        }
+        browser = subprocess.run(["node", str(AUTH_COMPOSE.with_name("auth_browser.mjs"))],
+                                 input=json.dumps(identity), text=True, capture_output=True, timeout=300)
+        self.assertEqual(browser.returncode, 0, browser.stdout + browser.stderr)
+        print(browser.stdout, flush=True)
 
     def seed_watchlists(self):
         self.sql("INSERT INTO Users (username,email,password_hash) VALUES (?,?,?),(?,?,?)",

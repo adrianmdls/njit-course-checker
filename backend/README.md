@@ -40,6 +40,10 @@ cookie's lifetime. The eight-hour authentication-age limit, production Secure
 host-only cookie, HttpOnly/SameSite flags and mutation protections remain in force.
 The disposable pipeline runs `test/auth.test.cjs` against its own random schema;
 `RUN_BROWSER_TESTS=1` also checks both response orders in Chrome's actual cookie jar.
+The opt-in authentication lifecycle test exercises actual backend restart,
+MariaDB outage and recovery, and fresh login and registration rate limits.
+It requires Node >=24 and Chrome or Chromium. The disposable runner and
+focused command are documented in the [Banner smoke tests](../docs/banner-smoke-test.md#disposable-automated-verification).
 
 ## Course search
 
