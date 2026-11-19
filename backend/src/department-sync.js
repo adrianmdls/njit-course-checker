@@ -18,6 +18,7 @@ function validate(body) {
   if (typeof term !== 'string' || !/^\d{4}(10|50|90|95)$/.test(term)) throw invalid('term', 'invalid_term');
   if (!Array.isArray(sections) || sections.length > 10000) throw invalid('sections', 'invalid_sections');
   const courses = new Map();
+  const lowestCrns = new Map();
   const unique = new Map();
   const uint = value => Number.isInteger(value) && value >= 0 && value <= 4294967295;
   for (const [index, row] of sections.entries()) {
@@ -25,8 +26,10 @@ function validate(body) {
     const match = typeof row.course === 'string' && /^([A-Z][A-Z0-9]{0,9})\s+(\d[A-Z0-9]{0,19})$/.exec(row.course);
     if (!match) throw invalid('course', 'invalid_course', index);
     if (match[1] !== subject) throw invalid('course', 'subject_mismatch', index);
-    let title = typeof row.title === 'string' ? row.title : '';
-    if (title.startsWith(`${row.course} - `)) title = title.slice(row.course.length + 3);
+    let title = typeof row.title === 'string' ? row.title.trim().replace(/\s+/g, ' ') : '';
+    const prefix = `${match[1]} ${match[2]} - `;
+    if (title.startsWith(prefix)) title = title.slice(prefix.length);
+    else if (title === prefix.trimEnd()) title = '';
     if (!title.trim() || [...title].length > 255) throw invalid('title', 'invalid_title', index);
     if (typeof row.crn !== 'string' || !/^\d{5}$/.test(row.crn)) throw invalid('crn', 'invalid_crn', index);
     if (typeof row.section !== 'string' || !row.section.trim() || [...row.section].length > 20) {
@@ -36,14 +39,18 @@ function validate(body) {
     if (!uint(row.max_enrollment)) throw invalid('max_enrollment', 'invalid_enrollment', index);
     if (!uint(row.current_enrollment)) throw invalid('current_enrollment', 'invalid_enrollment', index);
     const courseNumber = match[2];
-    if (courses.has(courseNumber) && courses.get(courseNumber) !== title) throw invalid('title', 'conflicting_title', index);
-    courses.set(courseNumber, title);
     const section = { crn: row.crn, courseNumber, title, section_number: row.section,
       capacity: row.max_enrollment, enrolled: row.current_enrollment, status: row.status };
     if (unique.has(row.crn) && JSON.stringify(unique.get(row.crn)) !== JSON.stringify(section)) {
       throw invalid('crn', 'conflicting_crn', index);
     }
     unique.set(row.crn, section);
+    // Distinct sections may have different valid titles. Five-digit CRNs sort
+    // lexically in numeric order; choose the same representative in any row order.
+    if (!lowestCrns.has(courseNumber) || row.crn < lowestCrns.get(courseNumber)) {
+      lowestCrns.set(courseNumber, row.crn);
+      courses.set(courseNumber, title);
+    }
   }
   return { subject, term, courses, sections: [...unique.values()] };
 }

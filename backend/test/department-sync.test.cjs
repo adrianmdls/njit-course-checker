@@ -47,7 +47,7 @@ test('authentication and validation reject requests before accessing the databas
         { max_enrollment: -1 }, { current_enrollment: 1.5 }, { current_enrollment: '20' },
         { max_enrollment: 4294967296 }].map(fields => ({ sections: [section(fields)] })),
       { sections: [section(), section({ status: 'CLOSED' })] },
-      { sections: [section(), section({ crn: '12346', title: 'Different' })] }];
+      { sections: [section(), section({ title: 'Different' })] }];
     for (const fields of invalid) {
       const body = fields === null ? null : snapshot(fields);
       assert.equal((await api.post(body)).status, 400, JSON.stringify(body));
@@ -79,7 +79,7 @@ test('validation diagnostics identify only fixed fields, row indexes and reason 
       [snapshot({ sections: [section({ status: 'PRIVATE-STATUS' })] }), 'status', 0, 'invalid_status'],
       [snapshot({ sections: [section({ max_enrollment: -1 })] }), 'max_enrollment', 0, 'invalid_enrollment'],
       [snapshot({ sections: [section({ current_enrollment: 'PRIVATE-ENROLLMENT' })] }), 'current_enrollment', 0, 'invalid_enrollment'],
-      [snapshot({ sections: [section(), section({ crn: '12346', title: 'PRIVATE-TITLE' })] }), 'title', 1, 'conflicting_title'],
+      [snapshot({ sections: [section(), section({ title: 'PRIVATE-TITLE' })] }), 'crn', 1, 'conflicting_crn'],
       [snapshot({ sections: [section(), section({ status: 'CLOSED' })] }), 'crn', 1, 'conflicting_crn'],
     ];
     for (const [body, field, row_index, reason] of cases) {
@@ -93,12 +93,12 @@ test('validation diagnostics identify only fixed fields, row indexes and reason 
       });
     }
     assert.ok(!JSON.stringify(warning.mock.calls.map(call => call.arguments)).includes('PRIVATE-'));
-    // Plausible DS payload conflict, not a capture of the historical failure.
+    // Same CRN with genuinely different normalized titles must still be rejected.
     const ds = section({ course: 'DS 644', title: 'DS 644 - Introduction to Big Data' });
     const response = await api.post(snapshot({ subject: 'DS', sections: [ds,
-      { ...ds, crn: '12346', title: 'Alternate title' }] }));
+      { ...ds, title: 'Alternate title' }] }));
     assert.equal(response.status, 400);
-    assert.deepEqual((await response.json()).validation, { field: 'title', row_index: 1, reason: 'conflicting_title' });
+    assert.deepEqual((await response.json()).validation, { field: 'crn', row_index: 1, reason: 'conflicting_crn' });
   } finally { await api.close(); }
 });
 

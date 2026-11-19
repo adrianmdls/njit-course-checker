@@ -340,16 +340,23 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(result["errors"], 2, (fixture, result))
             self.assertEqual(self.snapshot(), before)
 
-    def test_synthetic_ds_success_and_conflicting_title_diagnostics(self):
+    def test_synthetic_ds_section_title_variants_and_duplicate_crn_diagnostics(self):
         counts = self.probe("submit", subject="DS", term="202710", banner_fixture="valid")
         self.assertEqual(counts, {"courses": 1, "sections": 1, "status_changes": 0})
         self.assertEqual(self.sql("SELECT crn,enrolled,capacity FROM Sections"),
                          [{"crn": "01234", "enrolled": 31, "capacity": 30}])
+        original_id = self.sql("SELECT id FROM Sections")[0]["id"]
+        variants = self.probe("submit", subject="DS", term="202710", banner_fixture="conflicting_titles")
+        self.assertEqual(variants, {"courses": 1, "sections": 2, "status_changes": 0})
+        self.assertEqual(self.sql("SELECT title FROM Courses"), [{"title": "Introduction to Big Data"}])
+        self.assertEqual(self.sql("SELECT id FROM Sections WHERE crn='01234'"), [{"id": original_id}])
+        self.assertEqual(self.sql("SELECT crn,is_active FROM Sections ORDER BY crn"),
+                         [{"crn": "01234", "is_active": 1}, {"crn": "01235", "is_active": 1}])
         self.age_timestamps()
         before = self.snapshot()
-        rejected = self.probe("submit", subject="DS", term="202710", banner_fixture="conflicting_titles")
+        rejected = self.probe("submit", subject="DS", term="202710", banner_fixture="conflicting_duplicate_crn_titles")
         self.assertIn("HTTP 400", rejected["error"])
-        self.assertIn('"field": "title", "row_index": 1, "reason": "conflicting_title"', rejected["error"])
+        self.assertIn('"field": "crn", "row_index": 1, "reason": "conflicting_crn"', rejected["error"])
         self.assertEqual(self.snapshot(), before)
 
     def test_backend_failure_rolls_back_existing_and_new_records(self):

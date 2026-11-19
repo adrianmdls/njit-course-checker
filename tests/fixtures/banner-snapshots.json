@@ -57,5 +57,10 @@
     {
       "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Introduction to Big Data</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table><table class=\"sections-table\"><tr><td>unexpected</td></tr></table>"
     }
+  ],
+  "conflicting_duplicate_crn_titles": [
+    {
+      "SECTIONS_TABLE": "<h4 id=\"DS 644\">DS 644 - Introduction to Big Data</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table><h4 id=\"DS 644\">Different course title</h4><table class=\"sections-table\"><tr><td>H01</td><td>01234</td><td>M</td><td>10:00</td><td>CKB</td><td>OPEN</td><td>30</td><td>31</td><td>Instructor</td><td>In Person</td><td>3</td><td></td><td></td></tr></table>"
+    }
   ]
 }

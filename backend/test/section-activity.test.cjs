@@ -44,6 +44,75 @@ function recordingPool(existing = { subject: 'CS', status: 'CLOSED', is_active: 
   return { calls, async getConnection() { return connection; } };
 }
 
+test('distinct section titles are accepted for CS/202710 and IT/202690', async () => {
+  for (const [subject, term] of [['CS', '202710'], ['IT', '202690']]) {
+    const pool = recordingPool(null);
+    const response = await invoke(createSync(pool, 'test-token'), 'post', '/department', { body: {
+      subject, term, sections: [
+        { ...section('09000'), course: `${subject} 100`, title: 'Higher CRN topic' },
+        { ...section('00100'), course: `${subject} 100`, title: `${subject} 100 - Lower CRN topic` },
+      ],
+    } });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.body, { courses: 1, sections: 2, status_changes: 0 });
+    assert.deepEqual(pool.calls.find(call => call.sql.includes('INSERT INTO Courses')).params,
+      [subject, '100', 'Lower CRN topic']);
+    assert.deepEqual(pool.calls.find(call => call.sql.includes('INSERT INTO DepartmentSyncs')).params, [subject, term]);
+    assert.equal(pool.calls.at(-3).sql, 'COMMIT');
+  }
+});
+
+test('each course selects its lowest-CRN normalized title regardless of row order', async () => {
+  const rows = [
+    { ...section('09000'), title: 'Higher CRN topic' },
+    { ...section('00100'), course: 'CS\t100', title: '  CS\u00a0 100   -   Special\tTopics  - AI  ' },
+    { ...section('00200'), course: 'CS 101', title: 'CS 101 - Other course' },
+    { ...section('08000'), course: 'CS 101', title: 'Different other topic' },
+  ];
+  for (const order of [rows, [...rows].reverse(), [rows[2], rows[0], rows[3], rows[1]]]) {
+    const pool = recordingPool(null);
+    assert.equal((await ingest(pool, order)).statusCode, 200);
+    const titles = pool.calls.filter(call => call.sql.includes('INSERT INTO Courses'))
+      .map(call => call.params.slice(1)).sort(([a], [b]) => a.localeCompare(b));
+    assert.deepEqual(titles, [['100', 'Special Topics - AI'], ['101', 'Other course']]);
+  }
+});
+
+test('duplicate CRNs deduplicate only when normalized titles and section fields agree', async () => {
+  const pool = recordingPool(null);
+  const response = await ingest(pool, [
+    { ...section(), title: '  CS 100 - Intro\u00a0 to\tComputing  ' },
+    { ...section(), title: 'Intro to Computing' },
+  ]);
+  assert.deepEqual(response.body, { courses: 1, sections: 1, status_changes: 0 });
+  assert.equal(pool.calls.filter(call => call.sql.includes('INSERT INTO Sections')).length, 1);
+  assert.deepEqual(pool.calls.find(call => call.sql.includes('INSERT INTO Courses')).params,
+    ['CS', '100', 'Intro to Computing']);
+});
+
+test('duplicate CRNs with conflicting normalized titles or persisted fields reject before SQL', async () => {
+  for (const fields of [{ title: 'Different title' }, { course: 'CS 101' }, { section: '002' },
+    { status: 'CLOSED' }, { max_enrollment: 31 }, { current_enrollment: 21 }]) {
+    const pool = recordingPool();
+    const response = await ingest(pool, [section(), { ...section(), ...fields }]);
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(response.body.validation, { field: 'crn', row_index: 1, reason: 'conflicting_crn' });
+    assert.equal(pool.calls.length, 0);
+  }
+});
+
+test('every section title is validated even if another row would supply the catalog title', async () => {
+  for (const crn of ['00100', '09999']) {
+    for (const title of ['', ' \t\u00a0 ', ' CS\t100  -  ', 'x'.repeat(256), null]) {
+      const pool = recordingPool();
+      const response = await ingest(pool, [section(), { ...section(crn), title }]);
+      assert.equal(response.statusCode, 400);
+      assert.deepEqual(response.body.validation, { field: 'title', row_index: 1, reason: 'invalid_title' });
+      assert.equal(pool.calls.length, 0);
+    }
+  }
+});
+
 test('nonempty reconciliation scopes/deduplicates CRNs and commits after omission update', async () => {
   const pool = recordingPool();
   const result = await ingest(pool, [section(), section(), section('01235')]);
@@ -78,7 +147,8 @@ test('empty snapshots do not write any section fields or activity', async () => 
 
 test('failure after omission update rolls back before releasing the department lock', async () => {
   const pool = recordingPool(undefined, 'INSERT INTO DepartmentSyncs');
-  await assert.rejects(ingest(pool, [section()]), /injected/);
+  await assert.rejects(ingest(pool, [{ ...section('09000'), title: 'Other topic' }, section()]), /injected/);
+  assert.deepEqual(pool.calls.find(call => call.sql.includes('INSERT INTO Courses')).params, ['CS', '100', 'Intro']);
   assert.ok(pool.calls.some(call => call.sql.startsWith('UPDATE Sections')));
   assert.ok(!pool.calls.some(call => call.sql === 'COMMIT'));
   assert.equal(pool.calls.at(-3).sql, 'ROLLBACK');
@@ -181,7 +251,8 @@ test('MariaDB migration, omission, reactivation, rollback and historical watch/s
         courses: (await pool.query('SELECT * FROM Courses ORDER BY id'))[0] });
       const beforeFailure = await capture();
       await pool.query("CREATE TRIGGER fail_activity BEFORE INSERT ON DepartmentSyncs FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='injected failure'");
-      await assert.rejects(count([section('01235')]));
+      await assert.rejects(count([{ ...section('01235'), title: 'Returning topic' },
+        { ...section('01237'), title: 'New section topic' }]));
       assert.deepEqual(await capture(), beforeFailure);
       await pool.query('DROP TRIGGER fail_activity');
       assert.equal(await count([section('01235')]), 0, 'CLOSED to OPEN on reappearance is not a transition');
@@ -191,6 +262,15 @@ test('MariaDB migration, omission, reactivation, rollback and historical watch/s
       assert.equal(await count([section('01235')]), 0, 'idempotent repetition');
       assert.equal(await count([section('01235', 'CLOSED')]), 1);
       assert.equal(await count([section('01235')]), 1, 'continuously active CLOSED to OPEN counts');
+      const differentTitles = [{ ...section('01235'), title: ' CS 100 - Primary\t topic ' },
+        { ...section('01237'), title: 'Other topic' }];
+      for (const order of [differentTitles, [...differentTitles].reverse()]) {
+        assert.equal(await count(order), 0);
+        const [[course]] = await pool.query("SELECT title FROM Courses WHERE subject='CS' AND course_number='100'");
+        assert.equal(course.title, 'Primary topic');
+        assert.equal((await rows()).find(row => row.crn === '01235').id, 2);
+        assert.deepEqual((await pool.query('SELECT * FROM Watchlists ORDER BY id'))[0], watches);
+      }
       assert.ok((await rows()).every(row => row.snapshot_generation === 7));
       const [[metadata]] = await pool.query('SELECT snapshot_generation,last_refresh_status,last_refresh_source FROM DepartmentSyncs');
       assert.deepEqual(metadata, { snapshot_generation: 7, last_refresh_status: 'error', last_refresh_source: 'on_demand' });
