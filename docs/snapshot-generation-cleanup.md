@@ -56,18 +56,16 @@ repeat execution, row/timestamp/activity preservation, indexes and watchlist for
 keys. The existing F2 lifecycle now runs after migrations 04 and 05, covering
 omission, reactivation without a transition, genuine active transitions, empty
 snapshots, rollback, watchlists, and search/options. The full integration suite
-reuses these cases inside its isolated test database:
-
-```sh
-RUN_BROWSER_TESTS=1 python -B -m pytest tests/integration/test_pipeline.py -v
-```
+reuses these cases inside its isolated test database. See the
+[Banner smoke-test guide](banner-smoke-test.md) for current test commands.
 
 No initialization SQL, scheduler behavior, parser, live data, or application
 containers need to change for this cleanup.
 
-Verification for this cleanup: 31 backend tests passed on fresh disposable MariaDB
-(no skips), 72 Python unit tests plus 61 subtests, 15 frontend tests, lint and
-production build, and all 17 disposable integration cases including both Chrome
-scenarios. The initial backend run exposed a pre-removal test baseline; updating
+Recorded results for the snapshot-generation cleanup include 31 backend tests
+passed on fresh disposable MariaDB (no skips), 72 Python unit tests plus 61
+subtests, 15 frontend tests, lint and production build, and all 17 disposable
+integration cases including both Chrome scenarios. The initial backend run
+exposed a pre-removal test baseline; updating
 that assertion to compare against the migrated schema resolved it. No application
 behavior defect was found. `git diff --check` passed; nothing was staged or committed.

@@ -137,6 +137,9 @@ scheduler or pacing configuration was changed, and no live Banner call was made.
 
 ### Disposable pipeline follow-up
 
+This follow-up records the earlier F2 behavior and results. Use the
+[Banner smoke-test guide](banner-smoke-test.md) for current test commands.
+
 The existing MariaDB regression already covers the legacy-schema migration,
 experimental columns, scoped omission, stable IDs/watches, reactivation, transition
 counting, empty preservation, rollback, and search/options filtering. The pipeline
@@ -154,16 +157,7 @@ database column type, nullability, and default before running the reused tests.
 
 The suite now passes **all 17 integration cases** against disposable MariaDB,
 including migration from the previous schema with experimental columns and the
-full F2 lifecycle. Both real Chrome scenarios also passed. From the repository
-root, run:
-
-```sh
-python -B -m pytest tests/integration/test_pipeline.py -v
-```
-
-This command owns its random Compose project/tmpfs database and runs the migration
-case automatically; do not supply an application database. Optional existing
-browser checks can be enabled with `RUN_BROWSER_TESTS=1` when Chrome is available.
+full F2 lifecycle. Both real Chrome scenarios also passed.
 Current follow-up checks passed: 72 Python unit tests (plus 61 subtests), all 30
 backend tests on a fresh disposable MariaDB server, 15 frontend tests, frontend
 lint/build, and `git diff --check`. Database suites ran serially to avoid sharing

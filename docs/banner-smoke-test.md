@@ -1,232 +1,112 @@
 # Banner pipeline verification
 
-Run from the repository root. Automated tests use deterministic Banner HTML
-fixtures; only the upstream fetch is replaced. Python HTTP requests, the actual
-Express server, authentication, transactions, and MariaDB are real.
+Run these checks from the repository root. The disposable pipeline uses saved
+Banner HTML fixtures in place of live Banner requests. It runs the Python
+parser and scheduler path, Express, Nginx, and MariaDB.
 
 ## Disposable automated verification
 
-Requires Docker Compose v2 and host Python 3. No host Python packages are needed.
+Install Docker with Compose and use a host Python 3 interpreter. The runner
+uses the Python standard library. Docker needs network access to pull base
+images and install dependencies during the build.
 
 ```sh
 python3 -B tests/integration/test_pipeline.py
-# Also exercise the actual React build through Nginx using local Chrome:
+```
+
+Each run builds the app images and starts its own randomly named Compose
+project with a test database, test-only credentials, and a temporary frontend
+port on loopback. The database uses tmpfs. Express and MariaDB have no published
+ports. The runner ignores the application's `.env` and uses no application
+volumes. The fixture checker has no database credentials or direct database
+network access. The runner removes its stack and volumes even on test failure.
+Built images stay cached.
+
+The pipeline checks:
+
+- Scheduled fixture ingestion, regular rotation with no watches, and priority
+  checks as watches are added or removed.
+- Stable section IDs and watches, status changes, empty or partial snapshot
+  preservation, rejected input, and transaction rollback.
+- Direct and Nginx-proxied ingestion, including acceptance at exactly 5 MiB,
+  rejection above it, and unchanged Nginx and Express limits on the login route.
+- Session-authenticated search, term and department options, filters, sorting,
+  pagination, and watchlist reads through Nginx.
+- Existing-volume migration cases on a disposable schema, session restoration
+  and expiration, production HTTPS and cookie behavior, and Compose wiring.
+
+## Optional Chrome tests
+
+Install Node.js 24 or newer and Chrome or Chromium on the host. The runner
+defaults to the macOS Google Chrome install path. Set `CHROME_BIN` to the
+browser executable if it lives elsewhere. Use a Docker Compose version that
+supports the `!reset` override tag.
+
+```sh
 RUN_BROWSER_TESTS=1 python3 -B tests/integration/test_pipeline.py
 ```
 
-The runner builds the existing application Dockerfiles, creates a randomly named
-test project, and removes it on completion. MariaDB data lives in tmpfs. The
-browser run keeps its project-owned tmpfs volume mounted through a network-disabled
-container so the same MariaDB data survives a stop/start.
-No host database/backend ports, application `.env`, production volumes, or production records are used.
-The frontend publishes one temporary loopback port; the runner selects it and
-sets the matching test-only `APP_ORIGIN`. Nginx forwards real `/api/` requests.
-The checker has no DB credentials and shares no network with MariaDB; tests also
-block Python database imports and check that the database IP is unreachable.
-SQL setup and observations run through the disposable backend container.
-Built test images remain cached for reruns and the focused commands below.
+Chrome drives the built React app through Nginx. The populated and empty
+catalog tests cover department selection, search, pagination, watchlist
+add/remove and reload, error recovery, and session expiry. The authentication
+lifecycle in [auth_browser.mjs](../tests/integration/auth_browser.mjs) checks
+registration, login, logout, session persistence across a backend restart,
+and recovery with the same session after MariaDB stops and starts. During the
+outage it checks for `503` from both `/api/auth/me` and `/api/health`. It also
+checks the login and registration rate limits on the disposable backend.
 
-The pipeline covers watchlist priority and regular rotation, target deduplication
-and removal, scheduled snapshot submission, actual client GET/POST authentication,
-stable IDs and Watchlists, retries, status transitions, late transaction failure,
-failed Banner fetches, read-only target and catalog requests, and Compose wiring.
-The existing production-authentication smoke script also runs inside the test
-backend, checking HTTPS requirements and secure cookie flags in a child process.
-Failure tests compare all course, section, Watchlist, and synchronization rows;
-timestamps are deliberately aged so accidental freshness updates cannot hide
-within the same second. Fixtures include Winter terms, alphanumeric section
-labels, and titles containing ` - `.
+The browser run adds [auth-compose.yaml](../tests/integration/auth-compose.yaml).
+The override uses `!reset` to remove MariaDB's container-local tmpfs mount,
+which would lose its data on stop/start. A test-only tmpfs volume takes its
+place. A network-disabled helper keeps it mounted while MariaDB is stopped,
+so sessions and test rows survive the outage. The runner removes the volume
+with the test project. Chrome runs use temporary profiles that the helpers remove.
 
-Course-search coverage adds real cookie login, unauthenticated `401`, mandatory subject,
-number-prefix/full-code and stored status filters, sorting, pagination totals,
-repeat synchronization, updated enrollment/status, and empty unsynchronized
-department/term results. Full-row snapshots prove searches leave course,
-section, Watchlist and sync records unchanged. Internal Docker networks prevent
-searches from reaching live Banner. The 53-section fixture exercises two pages.
-An additional catalog-options test covers empty catalogs, deduplicated local
-term/subject pairs (including ECE and Winter), exclusion of unlinked sections
-and unscheduled courses, authentication and read-only behavior.
-
-`RUN_BROWSER_TESTS=1` requires host Node >=24, Chrome/Chromium, and Docker Compose
-with support for the `!reset` override tag. Set `CHROME_BIN`
-to the browser executable if needed. The authentication lifecycle scenario
-checks session continuity across a backend restart and a MariaDB stop/start,
-both endpoints' outage responses, and login and registration rate limits.
-Run the authentication scenario on its own with the focused test command.
+To run only the authentication lifecycle:
 
 ```sh
 RUN_BROWSER_TESTS=1 python3 -B tests/integration/test_pipeline.py \
   PipelineTests.test_disposable_authentication_browser_lifecycle
 ```
 
-The dependency-free Chrome
-DevTools helper does **not** mock fetch: it logs in via React, inspects actual
-search parameters, renders synchronized records and statuses, tests pagination,
-persistent Add/reload/Remove, duplicate clicks, retryable watchlist failures,
-empty results, and expires the actual MariaDB session to verify redirection.
-Watchlist changes in the browser test are removed before its final snapshot
-comparison; existing fixture users' watches remain untouched.
-One synchronized row is explicitly changed to NULL capacity/enrollment to test
-legacy nullable values, which the normalized ingestion contract cannot supply.
-Browser checks also capture a Spring 2027 department search, HTTP status and
-pagination metadata, exercise metadata network failure/retry and expiry, and
-verify required department selection, term-dependent departments and submitted
-pagination filters. They register a fresh account, log in and out through React,
-and check the protected route after logout. A fixture-only activity toggle on the
-disposable database verifies Unavailable/last-seen watchlist rendering and search
-exclusion, then restores activity. Transactional activity changes are covered by
-the separate API lifecycle and migration tests.
-The empty-catalog browser case verifies the explanatory message and disabled search.
-The pipeline tests run with or without the browser flag. Browser failures
-fail the suite when requested. Cleanup removes its
-temporary Chrome profile as well as the Compose stack, including on test failure.
+## Focused development tests
 
-After the integration runner builds the test images, run the focused suites
-separately without application credentials:
+For Python unit tests, use Python 3 on a Unix-like system and install
+`requirements.txt` in your virtual environment.
 
 ```sh
-docker run --rm -v "$PWD:/workspace:ro" -w /workspace \
-  -e PYTHONDONTWRITEBYTECODE=1 njit-banner-integration-checker \
-  python -B -m unittest discover -s tests -v
-docker run --rm -v "$PWD/backend/test:/app/test:ro" njit-banner-integration-backend npm test
+python3 -B -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-The first command above runs Python tests with mocked network/database calls;
-it does not start a polling loop. The backend command runs HTTP/authentication
-tests; its database group is intentionally skipped without `TEST_DB_PORT`.
-The disposable full-pipeline suite is the repeatable cross-language database
-verification. The existing backend database suite can also be run against a
-fresh disposable database as described in [backend documentation](../backend/README.md#tests).
+For standalone Node tests, use Node.js 24 or newer and install each package's
+locked dependencies. See [backend tests](../backend/README.md#tests) for
+running against an isolated MariaDB instance and
+[frontend tests, lint, and build](../frontend/README.md#verification-and-build)
+for React development.
 
-## Disposable frontend smoke test
+## Deployment network and TLS
 
-For interactive checks, use this separate stack, never the application database:
+Use the fixture suite for regression tests. On a VM deployment, check DNS,
+routing, firewalls, and TLS separately. The checker needs outbound access
+to NJIT Banner and the backend's HTTPS endpoint. Keep Express and MariaDB
+ports off the checker VM's network path.
 
-```sh
-export INTEGRATION_HTTP_PORT=8089 # choose an unused localhost port
-docker compose --env-file /dev/null -p njit-search-smoke -f tests/integration/compose.yaml build backend frontend checker-test
-docker compose --env-file /dev/null -p njit-search-smoke -f tests/integration/compose.yaml up -d --wait frontend
-printf '%s' '{"mode":"submit","subject":"CS","term":"202710","section_count":53,"mixed":true}' | \
-  docker compose --env-file /dev/null -p njit-search-smoke -f tests/integration/compose.yaml run --rm --no-deps -T checker-test
-```
+Terminate TLS at a trusted proxy in front of Nginx. Use
+`APP_ENV=production`, set `APP_ORIGIN` to the exact HTTPS browser origin, and
+set `API_SCHEME=https` so Nginx forwards the correct protocol. The setting
+only changes the forwarded header. Any proxy in front of Nginx must also
+allow the ingestion body size up to 5 MiB.
 
-Open `http://127.0.0.1:8089`, register a test account and log in. In Search Courses,
-select Spring 2027, department CS and `CS 100` (or prefix `1`). Expect 53 matches,
-50 on page 1 and three on page 2. Test each status, sort/order, Previous/Next and
-Add. Only locally available terms/departments appear. Search stays disabled until
-a department is selected. Changing terms clears an unavailable selection; changing
-either term or department clears old results. A nonexistent course
-prefix such as `99999` returns an empty list; direct authenticated API requests
-for PHIL or Fall 2026 also return empty results for this fixture. Searches and
-catalog options never trigger Banner or synchronization. In browser developer tools, confirm requests use
-`/api/courses`, `term=202710`, `subject=CS`, `query`, `status`, `sort`, `order`,
-`limit=50`, `offset`, and the session cookie. An unauthenticated request returns
-`401`; the authenticated API is also inspectable directly in those tools.
+For a checker on a separate VM, put `CHECKER_API_URL` (the reachable HTTPS
+base URL without `/api`), the shared `CHECKER_API_TOKEN`, `CHECKER_TERMS`,
+`BANNER_REQUEST_DELAY`, and the desired `TZ` in a private environment file.
+Keep the token separate from database and session credentials. Keep the
+file out of Git and shell traces. The checker needs no database credentials.
 
-To check nullable values and expiration, run the following **only** on this stack,
-then search again (after the first command expect em dashes; after the second
-expect the login page):
-
-```sh
-docker compose --env-file /dev/null -p njit-search-smoke -f tests/integration/compose.yaml exec -T backend node -e "const p=require('./src/db');p.query('UPDATE Sections SET capacity=NULL,enrolled=NULL WHERE crn=12000').finally(()=>p.end())"
-docker compose --env-file /dev/null -p njit-search-smoke -f tests/integration/compose.yaml exec -T backend node -e "const p=require('./src/db');p.query('UPDATE sessions SET expires=1').finally(()=>p.end())"
-docker compose --env-file /dev/null -p njit-search-smoke -f tests/integration/compose.yaml down --volumes --remove-orphans
-unset INTEGRATION_HTTP_PORT
-```
-
-## Optional local Compose smoke test with live Banner
-
-Use a local development database. Live polling updates the chosen real targets;
-do not submit the automated test's fabricated snapshots to an application DB.
-Live Banner may return errors independently of this pipeline.
-
-1. Copy `.env.example` to `.env` only if `.env` does not already exist. Set distinct
-   database passwords, `SESSION_SECRET`, and `CHECKER_API_TOKEN`. Keep
-   `APP_ENV=development`, `API_SCHEME=http`, and
-   `CHECKER_API_URL=http://backend:3000` locally. Set `CHECKER_TERMS` to the real
-   terms for regular rotation. Create a Watchlist entry to verify priority work.
-2. Validate the configuration and start the local stack with one checker.
-
-   ```sh
-   docker compose config --quiet
-   docker compose up -d --build --wait
-   ```
-
-3. Check database health and authenticated target retrieval from the checker.
-
-   ```sh
-   docker compose exec -T checker python -B -c \
-     'import os,requests; r=requests.get(os.environ["CHECKER_API_URL"]+"/api/health",timeout=10); r.raise_for_status(); print(r.json())'
-   docker compose exec -T checker python -B -c \
-     'from src.checker_api import get_monitoring_targets; print(get_monitoring_targets())'
-   ```
-
-   Expect a connected database and distinct watched pairs. An empty target list
-   means no priority work is scheduled. Regular rotation continues.
-
-4. After a scheduled slot, check `data/checker.log` and inspect stored
-   synchronization timestamps and sample records through Express's database connection.
-
-   ```sh
-   docker compose exec -T backend node <<'JS'
-   const pool = require('./src/db');
-   (async () => {
-     const [syncs] = await pool.execute('SELECT subject,term,last_synced_at FROM DepartmentSyncs ORDER BY subject,term');
-     const [sections] = await pool.execute('SELECT s.id,s.subject,s.term,s.crn,s.status,c.title FROM Sections s LEFT JOIN Courses c ON c.id=s.course_id ORDER BY s.id LIMIT 10');
-     console.log({ syncs, sections });
-   })().catch(error => { console.error(error.code || 'Database check failed'); process.exitCode = 1; })
-     .finally(() => pool.end());
-   JS
-   ```
-
-## Future VMware smoke test
-
-Application-level integration is verified by the disposable suite. VMware DNS,
-routing, TLS termination, and firewall rules must still be checked in the actual
-deployment; they are not configured by this commit.
-
-On the backend VM, provide the normal database variables, `SESSION_SECRET`, a
-shared `CHECKER_API_TOKEN`. Use
-`APP_ENV=production`, the exact HTTPS `APP_ORIGIN`, and a trusted TLS proxy.
-For the current Nginx configuration, `API_SCHEME=https` is appropriate only
-behind real TLS termination; that setting does not encrypt HTTP by itself.
-Keep direct backend and database ports unreachable from the checker VM.
-
-On the checker VM, create a private `checker.env` containing only:
-
-```dotenv
-CHECKER_API_URL=https://your-backend.example.edu
-CHECKER_API_TOKEN=<same secret as the backend>
-CHECKER_TERMS=["202690","202710"]
-BANNER_REQUEST_DELAY=5
-TZ=America/New_York
-```
-
-Do not commit that file, enable shell tracing, or print its contents. No `DB_*`
-variables are required. Build the existing checker Dockerfile from this checkout
-(or transfer the same tested image). Check the backend connection and target
-list before starting the scheduled checker.
-
-```sh
-chmod 600 checker.env
-docker build -t njit-checker:banner-integration .
-docker run --rm --env-file checker.env njit-checker:banner-integration python -B -c \
-  'import os,requests; r=requests.get(os.environ["CHECKER_API_URL"]+"/api/health",timeout=10); r.raise_for_status(); print(r.json())'
-docker run --rm --env-file checker.env njit-checker:banner-integration python -B -c \
-  'from src.checker_api import get_monitoring_targets; print(get_monitoring_targets())'
-```
-
-Start one managed checker after those checks pass. After a scheduled slot,
-inspect timestamps on the backend VM using the query in the local procedure above.
-
-Certificate validation must succeed; do not disable it to make the test pass.
-For a private CA, install its trust chain or supply the existing Requests
-`REQUESTS_CA_BUNDLE` setting with a mounted CA file. Confirm the checker can
-reach HTTPS and public Banner while it cannot reach MariaDB. Watches determine
-priority work. The configured terms and department list determine regular rotation.
-
-Known limits remain: no notifications, no snapshot ordering protection for
-multiple producers, and ambiguous completion after an HTTP timeout. A full
-department body may hit a proxy body limit before Express; fixture ingestion
-bypasses Nginx even though search/browser tests use it, so check the deployed
-proxy with representative real snapshots.
+If a connection fails, check DNS and routing from the checker VM and its
+container, then verify the certificate hostname and chain. Keep Requests
+certificate verification enabled. For a private CA, install its trust
+chain in the checker image or mount a CA bundle and set
+`REQUESTS_CA_BUNDLE` to the mounted file path. Run a single scheduled checker
+and use the [operations guide](operations.md#scheduling-and-monitoring) to
+check logs after a scheduled slot.
