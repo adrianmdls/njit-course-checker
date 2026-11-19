@@ -1,5 +1,9 @@
 # Phase 3: persistent watchlists
 
+> Historical record. Explicit monitoring targets were retired on November 19,
+> 2026. Both target endpoint forms now return distinct watched pairs. See
+> [current operations](operations.md#scheduling-and-monitoring).
+
 The browser watchlist now uses authenticated Express routes and the existing
 MariaDB Watchlists table. Phase 1 parsing and Phase 2 scheduling are unchanged.
 There are no new tables, migrations, dependencies, notifications or Banner calls.

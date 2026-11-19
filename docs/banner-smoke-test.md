@@ -24,10 +24,10 @@ block Python database imports and check that the database IP is unreachable.
 SQL setup and observations run through the disposable backend container.
 Built test images remain cached for reruns and the focused commands below.
 
-Seventeen integration tests cover configured and watched targets, deduplication,
-full snapshot polling, actual client GET/POST authentication, stable IDs and
-Watchlists, repeat requests, real status transitions, late transaction failure,
-failed Banner fetches, manual read-only behavior, and application Compose wiring.
+The pipeline covers watchlist priority and regular rotation, target deduplication
+and removal, scheduled snapshot submission, actual client GET/POST authentication,
+stable IDs and Watchlists, retries, status transitions, late transaction failure,
+failed Banner fetches, read-only target and catalog requests, and Compose wiring.
 The existing production-authentication smoke script also runs inside the test
 backend, checking HTTPS requirements and secure cookie flags in a child process.
 Failure tests compare all course, section, Watchlist, and synchronization rows;
@@ -64,8 +64,8 @@ disposable database verifies Unavailable/last-seen watchlist rendering and searc
 exclusion, then restores activity. Transactional activity changes are covered by
 the separate API lifecycle and migration tests.
 The empty-catalog browser case verifies the explanatory message and disabled search.
-Without the flag, only browser verification is omitted; all 17 pipeline tests
-still run. Browser failures fail the suite when requested. Cleanup removes its
+The pipeline tests run with or without the browser flag. Browser failures
+fail the suite when requested. Cleanup removes its
 temporary Chrome profile as well as the Compose stack, including on test failure.
 
 After the integration runner builds the test images, run the focused suites
@@ -130,50 +130,29 @@ Live Banner may return errors independently of this pipeline.
 1. Copy `.env.example` to `.env` only if `.env` does not already exist. Set distinct
    database passwords, `SESSION_SECRET`, and `CHECKER_API_TOKEN`. Keep
    `APP_ENV=development`, `API_SCHEME=http`, and
-   `CHECKER_API_URL=http://backend:3000` locally. Set a current real department/term
-   in `CHECKER_MONITORING_TARGETS`, or use existing Watchlists. The examples below
-   retrieve the configured targets rather than hard-coding a current term.
-2. Stop the background checker while running one-shot checks:
+   `CHECKER_API_URL=http://backend:3000` locally. Set `CHECKER_TERMS` to the real
+   terms for regular rotation. Create a Watchlist entry to verify priority work.
+2. Validate the configuration and start the local stack with one checker.
 
    ```sh
    docker compose config --quiet
-   docker compose stop checker
-   docker compose up -d --build --wait db backend
-   docker compose build checker
+   docker compose up -d --build --wait
    ```
 
-3. Check database health and authenticated target retrieval from the checker:
+3. Check database health and authenticated target retrieval from the checker.
 
    ```sh
-   docker compose run --rm --no-deps checker python -B -c \
+   docker compose exec -T checker python -B -c \
      'import os,requests; r=requests.get(os.environ["CHECKER_API_URL"]+"/api/health",timeout=10); r.raise_for_status(); print(r.json())'
-   docker compose run --rm --no-deps checker python -B -c \
+   docker compose exec -T checker python -B -c \
      'from src.checker_api import get_monitoring_targets; print(get_monitoring_targets())'
    ```
 
-   Expect a connected database and the desired unique target pairs. An empty
-   target list is a valid idle configuration; it does not verify a Banner fetch.
+   Expect a connected database and distinct watched pairs. An empty target list
+   means no priority work is scheduled. Regular rotation continues.
 
-4. Run the actual manual checker, which reads Banner without submitting updates:
-
-   ```sh
-   docker compose run --rm --no-deps checker python -B -m src.manual_check
-   ```
-
-5. Optionally perform one real synchronization cycle:
-
-   ```sh
-   docker compose run --rm --no-deps checker python -B -c \
-     'from src.checker import check_once; rows,errors,term=check_once(); print("\n".join(rows)); raise SystemExit(1 if errors else 0)'
-   ```
-
-   Expect one department summary per target. If Banner fails, the command exits
-   nonzero; do not interpret that as successful synchronization. Identical
-   fixture retries are tested automatically; two separate live fetches can
-   legitimately report changes.
-
-6. Inspect stored synchronization timestamps and sample records through Express's
-   database connection, without printing credentials:
+4. After a scheduled slot, check `data/checker.log` and inspect stored
+   synchronization timestamps and sample records through Express's database connection.
 
    ```sh
    docker compose exec -T backend node <<'JS'
@@ -187,18 +166,6 @@ Live Banner may return errors independently of this pipeline.
    JS
    ```
 
-   Run this inspection before and after step 4 if checking manual behavior by
-   hand. The automated test makes the stronger full-row equality assertion.
-
-7. Once satisfied, run exactly one background checker:
-
-   ```sh
-   docker compose up -d checker
-   docker compose logs --tail=30 checker backend
-   ```
-
-   Do not run one-shot synchronization alongside the background checker.
-
 ## Future VMware smoke test
 
 Application-level integration is verified by the disposable suite. VMware DNS,
@@ -206,7 +173,7 @@ routing, TLS termination, and firewall rules must still be checked in the actual
 deployment; they are not configured by this commit.
 
 On the backend VM, provide the normal database variables, `SESSION_SECRET`, a
-shared `CHECKER_API_TOKEN`, and explicit targets as needed. Use
+shared `CHECKER_API_TOKEN`. Use
 `APP_ENV=production`, the exact HTTPS `APP_ORIGIN`, and a trusted TLS proxy.
 For the current Nginx configuration, `API_SCHEME=https` is appropriate only
 behind real TLS termination; that setting does not encrypt HTTP by itself.
@@ -217,15 +184,15 @@ On the checker VM, create a private `checker.env` containing only:
 ```dotenv
 CHECKER_API_URL=https://your-backend.example.edu
 CHECKER_API_TOKEN=<same secret as the backend>
-CHECKER_TERMS='["202690","202710"]'
+CHECKER_TERMS=["202690","202710"]
 BANNER_REQUEST_DELAY=5
 TZ=America/New_York
 ```
 
 Do not commit that file, enable shell tracing, or print its contents. No `DB_*`
 variables are required. Build the existing checker Dockerfile from this checkout
-(or transfer the same tested image). Run these commands while the automated
-checker is stopped:
+(or transfer the same tested image). Check the backend connection and target
+list before starting the scheduled checker.
 
 ```sh
 chmod 600 checker.env
@@ -234,20 +201,16 @@ docker run --rm --env-file checker.env njit-checker:banner-integration python -B
   'import os,requests; r=requests.get(os.environ["CHECKER_API_URL"]+"/api/health",timeout=10); r.raise_for_status(); print(r.json())'
 docker run --rm --env-file checker.env njit-checker:banner-integration python -B -c \
   'from src.checker_api import get_monitoring_targets; print(get_monitoring_targets())'
-docker run --rm --env-file checker.env njit-checker:banner-integration python -B -m src.manual_check
 ```
 
-Then optionally run the one-shot synchronization command from step 5 using
-`docker run --rm --env-file checker.env njit-checker:banner-integration` in place
-of `docker compose run --rm --no-deps checker`. Inspect timestamps on the backend
-VM using step 6. Start exactly one managed checker only after those checks pass.
+Start one managed checker after those checks pass. After a scheduled slot,
+inspect timestamps on the backend VM using the query in the local procedure above.
 
 Certificate validation must succeed; do not disable it to make the test pass.
 For a private CA, install its trust chain or supply the existing Requests
 `REQUESTS_CA_BUNDLE` setting with a mounted CA file. Confirm the checker can
-reach HTTPS and public Banner while it cannot reach MariaDB. Configure explicit
-legacy monitoring targets deliberately; NULL course links do not preserve
-monitoring intent.
+reach HTTPS and public Banner while it cannot reach MariaDB. Watches determine
+priority work. The configured terms and department list determine regular rotation.
 
 Known limits remain: no notifications, no snapshot ordering protection for
 multiple producers, and ambiguous completion after an HTTP timeout. A full

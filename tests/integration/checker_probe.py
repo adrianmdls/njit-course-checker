@@ -1,9 +1,9 @@
-"""One-shot checker-side probe; only Banner I/O is replaced with fixture data."""
+"""Checker-side probe; scheduled slots use fixture Banner data and a fake clock."""
 
-import contextlib
 import importlib.abc
 import io
 import json
+import logging
 import os
 from pathlib import Path
 import socket
@@ -22,7 +22,7 @@ sys.path.insert(0, "/workspace")
 sys.meta_path.insert(0, RejectDatabaseImports())
 
 import requests
-from src import checker, manual_check
+from src import checker
 from src.checker_api import get_monitoring_targets, submit_department_snapshot
 from src.njit_scraper import parse_all_sections
 
@@ -113,7 +113,7 @@ def run(options):
                     results.append({"status": response.status_code, "body": response.json()})
                 return results
         if mode == "targets":
-            return {"targets": get_monitoring_targets()}
+            return {"targets": get_monitoring_targets(watched_only=options.get("watched_only", False))}
         if mode == "submit":
             data = (FIXTURES[options["banner_fixture"]] if "banner_fixture" in options else
                     banner(options["subject"], options.get("status", "OPEN"), options.get("enrolled", 20),
@@ -134,12 +134,7 @@ def run(options):
                           options.get("vary_enrollment", False))
 
         with patch.object(checker, "get_sections", side_effect=fetch):
-            if mode == "manual":
-                output = io.StringIO()
-                with contextlib.redirect_stdout(output):
-                    code = manual_check.main()
-                return {"exit_code": code, "output": output.getvalue(), "banner_calls": calls}
-            if mode == "scheduled":
+            if mode in ("scheduled", "scheduled_batch"):
                 class Clock:
                     seconds = 0
                     def time(self):
@@ -149,21 +144,39 @@ def run(options):
                     def wait(self, seconds):
                         self.seconds += seconds
                         return False
+                if mode == "scheduled_batch":
+                    departments, terms, kind = ["CS", "IT"], ["202710", "202795"], "watched"
+                else:
+                    departments, terms, kind = options["departments"], options["terms"], options.get("kind", "regular")
+                slot = 300 if kind == "watched" else 0
                 clock = Clock()
+                clock.seconds = slot
+                submissions = []
+                errors = io.StringIO()
+                handler = logging.StreamHandler(errors)
+                handler.setLevel(logging.ERROR)
+
+                def submit(subject, term, sections):
+                    counts = submit_department_snapshot(subject, term, sections)
+                    submissions.append({"subject": subject, "term": term, **counts})
+                    return counts
+
                 with tempfile.TemporaryDirectory() as directory:
-                    departments = options["departments"]
                     cursor = checker.RotationCursor(Path(directory) / "rotation.json", departments)
-                    scheduled = checker.ScheduledChecker(options["terms"], departments, cursor,
-                                                          clock=clock, wait=clock.wait)
-                    kind = options.get("kind", "regular")
-                    slot = 300 if kind == "watched" else 0
-                    clock.seconds = slot
-                    scheduled.run_slot(kind, slot)
-                    return {"banner_calls": calls, "next_subject": cursor.next_subject}
-            if mode != "poll":
-                raise ValueError("Unknown probe mode")
-            results, errors, term = checker.check_once()
-            return {"results": results, "errors": errors, "term": term, "banner_calls": calls}
+                    scheduled = checker.ScheduledChecker(terms, departments, cursor, clock=clock, wait=clock.wait)
+                    with patch.object(checker, "submit_department_snapshot", wraps=submit) as spy:
+                        checker.logger.addHandler(handler)
+                        try:
+                            scheduled.run_slot(kind, slot)
+                        finally:
+                            checker.logger.removeHandler(handler)
+                    messages = errors.getvalue()
+                    assert "integration-only-checker-token" not in messages
+                    assert "invalid-integration-token" not in messages
+                    return {"banner_calls": calls, "next_subject": cursor.next_subject,
+                            "submit_attempts": [list(call.args[:2]) for call in spy.call_args_list],
+                            "submissions": submissions, "errors": messages.splitlines()}
+            raise ValueError("Unknown probe mode")
     except requests.RequestException as error:
         message = str(error)
         assert "integration-only-checker-token" not in message

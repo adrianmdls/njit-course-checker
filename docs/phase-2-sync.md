@@ -1,5 +1,9 @@
 # Phase 2: round-robin synchronization
 
+> Historical record. The manual checker, standalone synchronization command,
+> and explicit monitoring targets were retired on November 19, 2026. Both
+> target endpoint forms now return watches. See [current operations](operations.md#scheduling-and-monitoring).
+
 The checker now has two independent scheduling threads inside its existing
 process. There are no new services, dependencies, queues, database tables or
 migrations. Phase 1 parsing and Express transactional upserts remain intact.

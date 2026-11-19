@@ -46,9 +46,8 @@ HTTPS base URL and the same token. Requests retain certificate verification.
 The direct Compose URL is for development; with `APP_ENV=production`, use the
 trusted HTTPS proxy URL because Express rejects direct HTTP ingestion.
 
-Python parses Banner snapshots and submits them to Express, which handles
-validation, transactions, upserts, and locking. The standalone
-`sync_department(subject, term, data=None)` helper uses the same HTTP API.
+The scheduled Python checker parses Banner snapshots and submits them to Express
+over HTTP. Express handles validation, transactions, upserts, and locking.
 
 Set `CHECKER_TERMS` to a JSON array of one or two distinct Banner term strings,
 for example `CHECKER_TERMS='["202690","202710"]'`. Missing/invalid configuration
@@ -83,15 +82,10 @@ see the [cursor recovery procedure](docs/phase-2-sync.md#cursor-recovery). A hel
 `data/checker.lock` prevents another checker using the same data directory.
 Preserve this directory and use only one checker deployment.
 
-The existing targets endpoint without the filter still merges Watchlists and
-backend `CHECKER_MONITORING_TARGETS` for legacy one-shot/manual callers. Explicit
-monitoring targets do not receive scheduled priority unless actually watched.
-NULL course links and catalog presence never imply a watch.
+Both forms of the targets endpoint return distinct watched subject/term pairs.
+Regular rotation continues when there are no watches. Catalog records create
+priority work only when a user watches a section.
 
-`manual_check` remains a separate one-shot command that fetches Banner without
-submitting, changing the rotation or sending notifications. Standalone commands
-are outside the scheduler's in-process request lock: do not run them alongside
-the automated checker. Neither the checker nor manual checks need SQL credentials.
 Failed fetches, malformed snapshots, rejected submissions and rollbacks do not
 advance successful database synchronization timestamps. A client timeout remains
 ambiguous: Express may finish committing after the client stops waiting.
@@ -112,7 +106,7 @@ Banner requests are optional. Backend test commands are in the
 njit-course-checker/
 ├── frontend/          # React application and Nginx configuration
 ├── backend/           # Express API
-├── src/               # Python HTTP checker and retained legacy helpers
+├── src/               # Scheduled Python checker, HTTP client, and Banner parser
 ├── database/
 │   ├── init/          # Initial database schema
 │   └── migrations/    # Additional schema changes
@@ -155,6 +149,6 @@ View service output with `docker compose logs -f`; stop the stack with `docker c
 ## Documentation
 
 - [Banner smoke tests](docs/banner-smoke-test.md): deterministic integration tests and local/VMware verification.
-- [Operations](docs/operations.md): routine commands, term codes, logs, and manual checks.
+- Routine commands, term codes, logs, and scheduling are in [Operations](docs/operations.md).
 - [Backend](backend/README.md): API endpoints, authentication, and backend configuration.
 - [Frontend](frontend/README.md): local React development, lint, and build commands.

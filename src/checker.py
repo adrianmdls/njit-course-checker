@@ -21,42 +21,6 @@ LOG_FILE = Path(__file__).resolve().parent.parent / "data" / "checker.log"
 logger = logging.getLogger(__name__)
 
 
-def check_once(persist_state=True):
-    """Fetch complete snapshots, optionally submitting them to Express."""
-    try:
-        targets = get_monitoring_targets()
-    except (requests.RequestException, ValueError) as error:
-        logger.error("Could not load monitoring targets: %s", error)
-        return [f"ERROR: Could not load monitoring targets: {error}"], 1, None
-
-    if not targets:
-        return ["No departments configured for monitoring."], 0, None
-
-    results = []
-    errors = 0
-    for target in targets:
-        subject, term = target["subject"], target["term"]
-        try:
-            sections = parse_all_sections(get_sections(subject, term))
-            if persist_state:
-                counts = submit_department_snapshot(subject, term, sections)
-                message = (
-                    f"{subject} {term}: synchronized {counts['courses']} courses, "
-                    f"{counts['sections']} sections, {counts['status_changes']} status changes."
-                )
-                logger.info(message)
-            else:
-                message = f"{subject} {term}: retrieved {len(sections)} sections (read-only)."
-            results.append(message)
-        except (requests.RequestException, ValueError, KeyError, TypeError) as error:
-            errors += 1
-            logger.error("Department check failed for %s %s: %s", subject, term, error)
-            results.append(f"ERROR: Department {subject}, term {term}: {error}")
-
-    terms = {target["term"] for target in targets}
-    return results, errors, next(iter(terms)) if len(terms) == 1 else None
-
-
 def setup_logging():
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(

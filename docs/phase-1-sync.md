@@ -1,5 +1,8 @@
 # Phase 1: Banner synchronization stabilization
 
+> Historical record. The standalone department-sync helper was retired on
+> November 19, 2026. See [current synchronization behavior](../README.md#banner-department-synchronization).
+
 Implemented on `feature/scheduled-course-sync`, based on `multi-container`.
 `feature/persistent-watchlists` is preserved separately. No experimental refresh
 services or snapshot-generation logic have been imported.

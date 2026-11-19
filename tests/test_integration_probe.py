@@ -1,4 +1,4 @@
-"""Offline checks of disposable-probe authentication; no Docker, HTTP or SQL."""
+"""Offline checks of the disposable probe; no Docker, HTTP or SQL."""
 import importlib.util
 import json
 import os
@@ -24,6 +24,41 @@ pipeline = load_probe_module("probe_pipeline", "test_pipeline.py")
 probe = load_probe_module("checker_probe_auth", "checker_probe.py")
 
 
+class ScheduledBatchTests(unittest.TestCase):
+    def test_batch_observes_a_sanitized_submission_failure_and_continues(self):
+        def response(status, body):
+            result = requests.Response()
+            result.status_code = status
+            result.url = "http://test.invalid/private-fixture-url"
+            result._content = json.dumps(body).encode()
+            return result
+
+        targets = response(200, {"targets": [
+            {"subject": subject, "term": term} for subject, term in pipeline.WATCHED_PAIRS
+        ]})
+        failure = response(503, {"error": "private fixture response"})
+        counts = {"courses": 2, "sections": 2, "status_changes": 0}
+        handlers = list(probe.checker.logger.handlers)
+        responses = [targets, targets, failure, targets, response(200, counts)]
+        with (
+            patch.dict(os.environ, {"CHECKER_API_URL": "http://test.invalid", "CHECKER_API_TOKEN": "test-token"}, clear=True),
+            patch.object(requests, "request", side_effect=responses) as http,
+        ):
+            result = probe.run({"mode": "scheduled_batch"})
+        self.assertEqual(probe.checker.logger.handlers, handlers)
+        self.assertEqual(result["banner_calls"], pipeline.WATCHED_PAIRS)
+        self.assertEqual(result["submit_attempts"], pipeline.WATCHED_PAIRS)
+        self.assertEqual(result["submissions"], [{"subject": "IT", "term": "202795", **counts}])
+        self.assertEqual(result["errors"], [
+            "watched synchronization failed for CS 202710: Department synchronization failed (HTTP 503)."
+        ])
+        posts = [call.kwargs["json"] for call in http.call_args_list if call.args[0] == "POST"]
+        self.assertEqual([(post["subject"], post["term"]) for post in posts],
+                         [tuple(pair) for pair in pipeline.WATCHED_PAIRS])
+        self.assertEqual([[section["crn"] for section in post["sections"]] for post in posts],
+                         [["12345", "12346"], ["54321", "54322"]])
+
+
 class ProbeAuthenticationTests(unittest.TestCase):
     def test_spring_fixture_has_distinct_section_titles_and_a_stable_lowest_crn(self):
         sections = probe.parse_all_sections(probe.banner("CS", section_count=53, mixed=True,
@@ -37,7 +72,7 @@ class ProbeAuthenticationTests(unittest.TestCase):
         self.assertEqual(min(sections, key=lambda row: row["crn"])["title"], "CS 100 - Introduction")
 
     def make_pipeline(self):
-        case = pipeline.PipelineTests("test_configured_and_watched_targets_merge")
+        case = pipeline.PipelineTests("test_watched_targets_deduplicate_and_demote")
         case.sql = Mock()
         case.setUp()
         payloads = []

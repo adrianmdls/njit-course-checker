@@ -28,7 +28,6 @@ services:
       APP_ORIGIN: http://127.0.0.1:${INTEGRATION_HTTP_PORT:?Set a disposable frontend port}
       SESSION_SECRET: integration-only-session-secret-0123456789
       CHECKER_API_TOKEN: integration-only-checker-token
-      CHECKER_MONITORING_TARGETS: '[{"subject":"IT","term":"202795"},{"subject":"IT","term":"202795"}]'
       DB_HOST: db
       DB_NAME: njit_course_checker
       DB_USER: root

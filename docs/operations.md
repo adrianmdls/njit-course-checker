@@ -21,17 +21,15 @@ MariaDB persists in a named volume. Checker activity is logged to
 unless you intend to delete the database. The current checker does not write
 `state.json` or `notification.log`.
 
-## Monitoring and manual checks
+## Scheduling and monitoring
 
 Regular synchronization rotates one NJIT subject at :00 and :30 for the one or
 two terms in `CHECKER_TERMS`. Priority synchronization reads actual Watchlists
 at :05/:15/:25/:35/:45/:55, filtered to the same configured terms and allowlist.
-Browser Add/Remove now persist the authenticated user's database Watchlists.
-The existing watched-only endpoint promotes/demotes distinct pairs across all
-users; the scheduler retains its configured-term and NJIT allowlist filters.
-Backend explicit
-`CHECKER_MONITORING_TARGETS` remains available to legacy/manual callers but does
-not grant scheduled priority. `CHECK_INTERVAL` is retired.
+The browser's Add and Remove controls update the authenticated user's Watchlist.
+Multiple watches on the same subject/term pair produce one priority target.
+Removing the last watch returns the pair to regular rotation. Regular rotation
+continues when all Watchlists are empty. `CHECK_INTERVAL` is retired.
 
 `BANNER_REQUEST_DELAY` is at least 5 seconds, measured from Banner completion to
 the next start. Both loops share one fetch/parse/submit gate; due regular work has priority
@@ -49,19 +47,8 @@ avoid automatic restart loops. Follow the documented
 is refused through `data/checker.lock`; separate data directories are not a
 cross-host singleton mechanism. No database migration is needed.
 
-The supported read-only manual command is:
-
-```sh
-docker compose exec checker manual_check
-```
-
-Run it only while the automated checker is stopped to avoid independent Banner
-requests. It retrieves legacy monitored departments from Express, fetches Banner, and prints
-department summaries without submitting snapshots, changing database records,
-or sending notifications. If the checker is stopped, use
-`docker compose run --rm --no-deps checker manual_check` with the backend running.
-For one-shot synchronization and deterministic verification, use the
-[smoke-test guide](banner-smoke-test.md); run only one synchronization producer.
+Follow scheduled activity and failures with `tail -f data/checker.log`.
+For deterministic fixture verification, see the [smoke-test guide](banner-smoke-test.md).
 
 Authenticated search reads synchronized MariaDB records. Searching an
 unsynchronized department/term returns an empty list and never triggers Banner.

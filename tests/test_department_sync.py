@@ -6,7 +6,6 @@ from unittest.mock import patch
 import requests
 
 from src.checker_api import get_monitoring_targets, submit_department_snapshot
-from src.department_sync import sync_department
 from src.njit_scraper import parse_all_sections
 
 
@@ -68,13 +67,13 @@ class CheckerAPITests(unittest.TestCase):
     def test_validation_diagnostics_are_structured_and_allowlisted(self):
         self.response.status_code = 400
         self.response.raise_for_status.side_effect = requests.HTTPError("unsafe test-secret-token", response=self.response)
-        diagnostic = {"field": "title", "row_index": 1, "reason": "conflicting_title"}
+        diagnostic = {"field": "crn", "row_index": 1, "reason": "conflicting_crn"}
         self.response.json.return_value = {"error": "test-secret-token", "validation": {
             **diagnostic, "raw": "test-secret-token"}}
         with self.assertRaises(requests.HTTPError) as caught:
             submit_department_snapshot("DS", "202710", self.sections)
         self.assertEqual(caught.exception.validation, diagnostic)
-        self.assertIn("conflicting_title", str(caught.exception))
+        self.assertIn("conflicting_crn", str(caught.exception))
         self.assertNotIn("test-secret-token", "".join(traceback.format_exception(caught.exception)))
         for value in ({"field": "title", "reason": "test-secret-token", "row_index": 0},
                       {"field": [], "reason": "invalid_title"},
@@ -128,38 +127,6 @@ class CheckerAPITests(unittest.TestCase):
                 self.response.json.return_value = body
                 with self.assertRaisesRegex(requests.RequestException, "invalid targets"):
                     get_monitoring_targets()
-
-
-class DepartmentSyncTests(unittest.TestCase):
-    @patch("builtins.print")
-    @patch("src.department_sync.submit_department_snapshot", return_value=COUNTS)
-    @patch("src.department_sync.get_sections", return_value=BANNER)
-    def test_fetches_parses_and_submits_without_database(self, fetch, submit, output):
-        self.assertIsNone(sync_department(" it ", 202795))
-        fetch.assert_called_once_with("IT", "202795")
-        submit.assert_called_once_with("IT", "202795", parse_all_sections(BANNER))
-        output.assert_called_once_with("Synchronized 1 courses and 1 sections for IT 202795")
-
-    @patch("builtins.print")
-    @patch("src.department_sync.submit_department_snapshot", return_value=COUNTS)
-    @patch("src.department_sync.get_sections")
-    def test_reuses_supplied_banner_data(self, fetch, submit, output):
-        sync_department("IT", "202795", data=BANNER)
-        fetch.assert_not_called()
-        submit.assert_called_once_with("IT", "202795", parse_all_sections(BANNER))
-
-    @patch("src.department_sync.submit_department_snapshot")
-    @patch("builtins.print")
-    def test_empty_snapshot_is_submitted(self, output, submit):
-        submit.return_value = {"courses": 0, "sections": 0, "status_changes": 0}
-        sync_department("IT", "202795", data=[])
-        submit.assert_called_once_with("IT", "202795", [])
-
-    @patch("src.department_sync.submit_department_snapshot")
-    def test_malformed_snapshot_is_not_submitted(self, submit):
-        with self.assertRaises(ValueError):
-            sync_department("IT", "202795", data=[{"SECTIONS_TABLE": "upstream error"}])
-        submit.assert_not_called()
 
 
 if __name__ == "__main__":

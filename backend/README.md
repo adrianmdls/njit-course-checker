@@ -23,7 +23,7 @@ For installation, environment setup, and database initialization, see the [root 
 | GET | `/api/auth/me` | Returns the current user (`200`) or unauthenticated/expired session (`401`) |
 | GET | `/api/courses/options` | Session-authenticated locally available terms and departments (`200`) |
 | GET | `/api/courses` | Session-authenticated section search; requires `term` and `subject`, returns sections and pagination (`200`) |
-| GET | `/api/internal/sync/targets` | Bearer-authenticated unique Watchlist and explicit subject/term pairs (`200`) |
+| GET | `/api/internal/sync/targets` | Bearer-authenticated distinct watched subject/term pairs (`200`) |
 | POST | `/api/internal/sync/department` | Bearer-authenticated department snapshot; returns processed course, section, and status-change counts (`200`) |
 
 Registration requires a username of 3–50 letters, digits, or underscores and a password of 15–128 Unicode code points. Invalid registration input returns `400`; duplicate username/email returns `409`.
@@ -206,20 +206,14 @@ It returns, for example:
 {"targets":[{"subject":"IT","term":"202795"}]}
 ```
 
-With `?watched_only=true`, the same endpoint returns only distinct database
-Watchlist subject/term pairs. The scheduled checker uses this filter, then limits
+With or without `?watched_only=true`, the endpoint returns distinct watched
+subject/term pairs ordered by subject and term. Watches on inactive or unlinked
+sections count. When there are no watches, it returns `{"targets":[]}`. The
+endpoint is read-only. The scheduled checker uses the query form and limits the
 pairs to its configured terms and NJIT allowlist. Other query values, duplicate
 parameters and unknown keys return `400` before accessing the database.
 
-Without a query, targets retain the backwards-compatible merge of distinct Watchlist subject/term pairs with the backend-only
-`CHECKER_MONITORING_TARGETS` JSON array (default `[]`). Duplicates collapse to one
-pair; NULL course links and catalog presence do not imply monitoring. An empty
-result is `{ "targets": [] }`. The endpoint does not write data. Explicit target
-configuration accepts the same subject and term formats as ingestion; malformed
-configuration prevents startup. See the [legacy monitoring upgrade notes](../README.md#banner-department-synchronization)
-before deploying against an existing database.
-
-Python polling and manual checks use HTTP only. Express owns all monitoring
+The scheduled Python checker uses HTTP for all backend access. Express owns monitoring
 reads, section writes, status comparisons, synchronization timestamps, and
 MariaDB queries for course search. No notifications are sent by these endpoints.
 
@@ -261,6 +255,5 @@ Compose supplies these backend variables:
 | `APP_ORIGIN` | Exact browser origin, without a trailing slash; defaults to `http://localhost:8080` |
 | `SESSION_SECRET` | Required signing secret, at least 32 bytes; changing it invalidates existing cookies |
 | `CHECKER_API_TOKEN` | Bearer credential for internal ingestion and monitoring targets; empty disables both |
-| `CHECKER_MONITORING_TARGETS` | Backend-only JSON array of explicit `{subject, term}` pairs; defaults to `[]` |
 
 The `sessions` table must exist before startup; MariaDB initializes it automatically for new Compose database volumes. Existing volumes require any missing migrations to be applied manually. Express does not create the table. `API_SCHEME` configures Nginx's forwarded protocol, not TLS itself. Keep the local values from `.env.example` for the Compose demo.

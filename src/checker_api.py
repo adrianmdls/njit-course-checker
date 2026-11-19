@@ -84,7 +84,7 @@ def submit_department_snapshot(subject, term, sections):
 
 
 def get_monitoring_targets(watched_only=False):
-    """Retrieve unique monitored subject/term pairs from Express."""
+    """Retrieve distinct watched subject/term pairs using either supported URL."""
     result = _request("GET", "/api/internal/sync/targets" + ("?watched_only=true" if watched_only else ""))
     try:
         targets = result["targets"]
