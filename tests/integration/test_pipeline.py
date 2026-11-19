@@ -149,6 +149,53 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("HTTP 401", result["error"])
         self.assertEqual(self.snapshot(), before)
 
+    def test_ingestion_request_limits_through_actual_nginx(self):
+        maximum = 5 * 1024 * 1024
+        large = {"section_count": 1500, "comments_length": 800}
+        ids = None
+        for proxied in (False, True):
+            with self.subTest(proxied=proxied, case="large valid observations"):
+                result = self.probe("ingestion_http", proxied=proxied, **large)
+                self.assertGreater(result["request_bytes"], 1024 * 1024)
+                self.assertLess(result["request_bytes"], maximum)
+                self.assertEqual(result["status"], 200, result)
+                self.assertEqual(result["body"], {"courses": 1, "sections": 1500, "status_changes": 0})
+                stored = self.sql("SELECT id,crn FROM Sections ORDER BY crn")
+                self.assertEqual(len(stored), 1500)
+                if ids is not None:
+                    self.assertEqual(stored, ids, "proxy retries preserve existing identities")
+                ids = stored
+            with self.subTest(proxied=proxied, case="exact maximum"):
+                result = self.probe("ingestion_http", proxied=proxied, body_bytes=maximum)
+                self.assertEqual(result["request_bytes"], maximum)
+                self.assertEqual(result["status"], 200, result)
+                self.assertEqual(result["body"], {"courses": 1, "sections": 1, "status_changes": 0})
+            before = self.snapshot()
+            for options, status in (({"body_bytes": maximum + 1}, 413),
+                                    ({**large, "missing_token": True}, 401),
+                                    ({**large, "invalid_token": True}, 401),
+                                    ({**large, "invalid_row": True}, 400)):
+                with self.subTest(proxied=proxied, options=options):
+                    result = self.probe("ingestion_http", proxied=proxied, **options)
+                    self.assertEqual(result["status"], status, result)
+                    self.assertEqual(self.snapshot(), before, "rejected requests cannot modify stored observations")
+        # Express accepts the trailing slash/case aliases; the proxy limit must
+        # cover them without granting a larger body to other public API routes.
+        alias = self.probe("ingestion_http", proxied=True, path="/api/internal/sync/DEPARTMENT/", **large)
+        self.assertEqual(alias["status"], 200, alias)
+        before = self.snapshot()
+        for size in (16 * 1024, maximum):
+            result = self.probe("ingestion_http", proxied=True, path="/api/auth/login", body_bytes=size)
+            self.assertEqual(result["status"], 413, result)
+            if size > 1024 * 1024:
+                self.assertIsNone(result["body"], "unrelated routes must retain Nginx's 1 MiB rejection")
+            else:
+                self.assertEqual(result["body"], {"error": "Request too large"}, "Express retains its 8 KiB auth limit")
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.probe("options", authenticated=False)["status"], 401)
+        # Verify the envsubst-generated configuration in the actual production image.
+        self.command("exec", "-T", "frontend", "nginx", "-t")
+
     def test_synchronized_course_search_through_proxy(self):
         self.seed_watchlists()
         # These legacy watches belong to observed fixture CRNs. Pagination must

@@ -2,6 +2,14 @@
 
 Express provides authentication, course search, internal Banner snapshot ingestion, and a database health check. Nginx forwards `/api/` requests to `backend:3000`, and Express uses a shared mysql2 connection pool to reach MariaDB at `db:3306` over the Compose network. The backend has no published host port.
 
+Checker ingestion at `/api/internal/sync/department` accepts JSON bodies up to
+5 MiB (5,242,880 bytes), with matching Nginx and Express limits. Oversized bodies
+return `413`; accepted sizes still require the checker Bearer token and whole-body
+validation. Other proxy routes retain Nginx's 1 MiB limit; Express additionally
+limits auth JSON to 8 KiB and watchlist JSON to 1 KiB. The disposable pipeline tests
+the built Nginx image with large valid observations, the exact ingestion boundary,
+oversized rejection, credentials, validation, and unchanged public-route limits.
+
 For installation, environment setup, and database initialization, see the [root README](../README.md).
 
 ## API Endpoints

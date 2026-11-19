@@ -63,6 +63,29 @@ def run(options):
     if options.get("invalid_token"):
         os.environ["CHECKER_API_TOKEN"] = "invalid-integration-token"
     try:
+        if mode == "ingestion_http":
+            # Synthetic JSON observations; only these two test-network hosts are
+            # reachable. Keep raw bytes for exact proxy/parser boundary checks.
+            sections = [{"course": "CS 100", "title": "Request limit fixture", "crn": str(10000 + index),
+                         "section": "001", "status": "OPEN", "max_enrollment": 30,
+                         "current_enrollment": 20, "comments": "x" * options.get("comments_length", 0)}
+                        for index in range(options.get("section_count", 1))]
+            if options.get("invalid_row"):
+                sections[-1]["crn"] = "invalid"
+            body = json.dumps({"subject": "CS", "term": "202710", "sections": sections}).encode()
+            body += b" " * max(0, options.get("body_bytes", 0) - len(body))
+            headers = {"Content-Type": "application/json", "Origin": os.environ["APP_ORIGIN"],
+                       "X-Requested-With": "NJIT-Course-Checker"}
+            if not options.get("missing_token"):
+                headers["Authorization"] = f'Bearer {os.environ["CHECKER_API_TOKEN"]}'
+            host = "frontend" if options.get("proxied") else "backend:3000"
+            response = requests.post(f'http://{host}{options.get("path", "/api/internal/sync/department")}',
+                                     data=body, headers=headers, timeout=60)
+            try:
+                result = response.json()
+            except ValueError:
+                result = None  # Nginx's own 413 response is HTML.
+            return {"status": response.status_code, "body": result, "request_bytes": len(body)}
         if mode in ("authenticate", "search", "options", "watchlist"):
             # Exercise Nginx, real login and cookie reuse; no Banner helper is called.
             with requests.Session() as session:
