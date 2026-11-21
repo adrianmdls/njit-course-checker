@@ -83,3 +83,5 @@ The [Terraform files](infrastructure/terraform/) define the AWS network and
 supporting resources, plus an ECS frontend service using the `:m1` image. The
 [IT 342 diagram](docs/IT%20342%20Architecture%20Diagram.drawio) shows the broader
 planned deployment, including the backend, database, checker, and email delivery.
+See [AWS database initialization](docs/cloud_infrastructure/aws-db-initialization.md)
+for the one-off ECS task.
