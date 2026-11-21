@@ -8,6 +8,11 @@ output "ecs_frontend_service_name" {
   value       = var.enable_runtime ? aws_ecs_service.frontend[0].name : null
 }
 
+output "ecs_backend_service_name" {
+  description = "Name of the ECS backend service when enabled."
+  value       = one(aws_ecs_service.backend[*].name)
+}
+
 output "alb_dns_name" {
   description = "DNS name of the internet-facing frontend ALB."
   value       = var.enable_runtime ? aws_lb.frontend[0].dns_name : null
@@ -21,6 +26,11 @@ output "frontend_url" {
 output "frontend_repository_url" {
   description = "URL of the private frontend ECR repository."
   value       = aws_ecr_repository.frontend.repository_url
+}
+
+output "backend_repository_url" {
+  description = "URL of the private ECR repository shared by the backend and database initializer."
+  value       = aws_ecr_repository.backend.repository_url
 }
 
 output "storage_bucket_name" {

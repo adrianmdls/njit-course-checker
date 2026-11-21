@@ -8,3 +8,14 @@ resource "aws_cloudwatch_log_group" "frontend" {
     Name = "${var.project_name}-frontend-logs"
   }
 }
+
+resource "aws_cloudwatch_log_group" "backend" {
+  count = local.backend_enabled ? 1 : 0
+
+  name              = "/ecs/${local.backend_name}"
+  retention_in_days = 7
+
+  tags = {
+    Name = "${local.backend_name}-logs"
+  }
+}
