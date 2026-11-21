@@ -1,38 +1,42 @@
 # NJIT Course Availability Checker
 
-An IT 610 project under development using Docker Compose to run a React/Nginx frontend, an Express backend, a MariaDB database, and a Python course availability checker.
+An IT 610 project for checking NJIT course availability. Create an account to
+search for sections by term and department, check seat counts and status, and
+save sections to your watchlist. Email delivery is planned as a separate worker.
+The Watchlist currently shows a disabled notification control.
 
-The frontend sends `/api/` requests through Nginx to Express, which connects to MariaDB. The Python checker also reads and updates MariaDB. Docker networking connects the services internally.
+## How it works
 
-## Current Functionality
+The app runs in four Docker Compose services. The React frontend is served by
+Nginx, which forwards API calls to the Express backend. Express handles accounts,
+course search, and watchlists using MariaDB. The fourth service is the Python
+checker, which fetches department results from NJIT Banner, parses the sections,
+and posts a snapshot to Express with a separate API token. Express validates and
+saves each snapshot in a transaction.
 
-- Account registration, login/logout, and session-based access to the dashboard.
-- Express database health endpoint and authentication API.
-- Python monitoring of database-configured sections, availability updates, local logs, and optional Discord notifications.
+## Banner department synchronization
 
-The dashboard currently displays mock course data. Course search and watchlist management are not yet connected to the Express API. An empty database has no sections to monitor.
+The checker rotates through departments at :00 and :30. Every ten minutes
+starting at :05, it checks department and term pairs that have at least one
+watched section. A watched pair uses the priority schedule while it has watches.
+Regular rotation continues when watchlists are empty.
 
-## Project Structure
+Set `CHECKER_TERMS` to one or two current Banner terms. Compose uses those
+same terms for the search dropdown. Search reads saved sections from MariaDB
+and never triggers a Banner request.
 
-```text
-njit-course-checker/
-├── frontend/          # React application and Nginx configuration
-├── backend/           # Express API
-├── src/               # Python checker and database integration
-├── database/
-│   ├── init/          # Initial database schema
-│   └── migrations/    # Additional schema changes
-├── data/              # Persistent checker logs (excluded from Git)
-├── docs/operations.md
-├── compose.yaml
-└── .env.example
-```
+Only sections that appear in a snapshot get updated. If Banner omits a section,
+its last recorded status, last-seen time, and any watches are kept. An empty
+snapshot also leaves section records intact. Older availability can go stale,
+so check the section's last-seen time. Run one checker deployment at a time to
+keep snapshots in order. See [Operations](docs/operations.md#scheduling-and-monitoring).
 
-## Quick Start
+## Quick start
 
-Requires Git, Docker with Compose v2, and internet access to build images. Host installations of Node.js, Python, and MariaDB are not required.
+You need Git, Docker with Compose, and internet access to build the images and
+reach Banner.
 
-1. Clone the repository and copy the environment template:
+1. Clone the repo. For a fresh checkout, copy the environment template.
 
    ```sh
    git clone https://github.com/adrianmdls/njit-course-checker.git
@@ -40,25 +44,42 @@ Requires Git, Docker with Compose v2, and internet access to build images. Host 
    cp .env.example .env
    ```
 
-2. Edit `.env` and set distinct `DB_ROOT_PASSWORD` and `DB_PASSWORD` values, plus `SESSION_SECRET`. Generate a secret with `openssl rand -hex 32` (requires OpenSSL), then paste the result into `.env`.
+2. In `.env`, set different values for `DB_ROOT_PASSWORD` and `DB_PASSWORD`.
+   Generate separate values for `SESSION_SECRET` and `CHECKER_API_TOKEN` by
+   running `openssl rand -hex 32` once for each. Keep `.env` private and keep
+   the session secret stable across restarts.
 
-   Keep the local defaults `APP_ENV=development`, `APP_ORIGIN=http://localhost:8080`, and `API_SCHEME=http`. `CHECK_INTERVAL` defaults to 600 seconds; `DISCORD_WEBHOOK_URL` is optional. Never commit `.env`, and keep the session secret stable across restarts. Local HTTP settings are for local use; production requires HTTPS.
+   Set `CHECKER_TERMS` to the terms you want to monitor, for example
+   `CHECKER_TERMS='["202690","202710"]'`. See the
+   [term code table](docs/operations.md#banner-term-codes). Keep the template's
+   HTTP settings for local development. Production requires HTTPS.
 
-3. Build and start the services:
+3. Build and start the stack.
 
    ```sh
    docker compose up -d --build --wait
    ```
 
-   For a new database volume, MariaDB automatically runs the base schema and all three migrations in order. No manual migration commands are needed for a fresh installation.
+   Open <http://localhost:8080>, register, and log in. Use `localhost` so the
+   browser origin matches `APP_ORIGIN`. Departments appear in search as the
+   checker saves data for them.
 
-   Open **http://localhost:8080**, register, and log in. Use `localhost` to match `APP_ORIGIN`. Check database connectivity at **http://localhost:8080/api/health**.
-
-Existing database volumes do not automatically receive migrations. Back up and inspect an existing database, then apply only missing changes from `database/migrations/`. Do not blindly rerun `02-course-catalog.sql` if `Sections.course_id` already exists.
-
-View service output with `docker compose logs -f`; stop the stack with `docker compose down`. MariaDB persists in a named volume, and checker logs persist in `data/`. **Do not use `docker compose down -v` unless you intend to delete the database.**
+MariaDB initializes a fresh volume automatically. For an existing volume, back
+up the database and [apply only missing migrations](backend/README.md#database-and-migrations).
+Keep the MariaDB volume and the checker's `data/` directory. See
+[Operations](docs/operations.md) for service commands, logs, and troubleshooting.
 
 ## Documentation
 
-- [Operations](docs/operations.md): existing operational notes; still describes parts of the older checker setup and will be updated after Milestone 2.
-- [Backend](backend/README.md): API endpoints, authentication, and backend configuration.
+- [Backend](backend/README.md) covers the API, database, and configuration.
+- [Frontend](frontend/README.md) covers local React development.
+- The [Banner smoke-test guide](docs/banner-smoke-test.md) covers disposable integration
+  tests and deployment checks.
+
+Earlier implementation notes cover [Banner ingestion](docs/phase-1-sync.md),
+[scheduling](docs/phase-2-sync.md), and [persistent watchlists](docs/phase-3-watchlists.md).
+
+The [Terraform files](infrastructure/terraform/) define the AWS network and
+supporting resources, plus an ECS frontend service using the `:m1` image. The
+[IT 342 diagram](docs/IT%20342%20Architecture%20Diagram.drawio) shows the broader
+planned deployment, including the backend, database, checker, and email delivery.

@@ -1,5 +1,5 @@
 /* eslint-disable react/only-export-components -- Keep the small auth context and its helpers together. */
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react'
 import { Navigate, Outlet } from 'react-router'
 
 export async function authRequest(path, body) {
@@ -22,24 +22,60 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  async function refresh() {
-    try { setUser((await authRequest('me')).user) }
+  // Session reads may only update the auth generation in which they started.
+  const generation = useRef(0)
+  const sessionRequest = useRef(0)
+  const refresh = useCallback(async () => {
+    const version = generation.current
+    const request = ++sessionRequest.current
+    const current = () => version === generation.current && request === sessionRequest.current
+    setLoading(true)
+    setError('')
+    try {
+      const data = await authRequest('me')
+      if (current()) setUser(data.user)
+    }
     catch (failure) {
+      if (!current()) return
       setUser(null)
       if (failure.status !== 401) setError('Unable to check your session. Please retry.')
-    } finally { setLoading(false) }
-  }
-  // eslint-disable-next-line react/set-state-in-effect -- Fetch the server session asynchronously on mount.
-  useEffect(() => { refresh() }, [])
+    } finally { if (current()) setLoading(false) }
+  }, [])
+  useEffect(() => {
+    // eslint-disable-next-line react/set-state-in-effect -- Restore the server session on mount.
+    refresh()
+    return () => { sessionRequest.current += 1 }
+  }, [refresh])
   async function login(identifier, password) {
-    const data = await authRequest('login', { identifier, password })
-    setUser(data.user)
+    const version = ++generation.current
+    try {
+      const data = await authRequest('login', { identifier, password })
+      if (version !== generation.current) return
+      setUser(data.user)
+      setError('')
+    } finally {
+      if (version === generation.current) {
+        // Also invalidate session reads started while this mutation was pending.
+        generation.current += 1
+        setLoading(false)
+      }
+    }
   }
   async function logout() {
-    await authRequest('logout', {})
-    setUser(null)
+    const version = ++generation.current
+    try {
+      await authRequest('logout', {})
+      if (version !== generation.current) return
+      setUser(null)
+      setError('')
+    } finally {
+      if (version === generation.current) {
+        generation.current += 1
+        setLoading(false)
+      }
+    }
   }
-  return <AuthContext.Provider value={{ user, loading, error, refresh: () => { setLoading(true); setError(''); refresh() }, login, logout }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, loading, error, refresh, login, logout }}>{children}</AuthContext.Provider>
 }
 export function useAuth() { return useContext(AuthContext) }
 export function RequireAuth() {

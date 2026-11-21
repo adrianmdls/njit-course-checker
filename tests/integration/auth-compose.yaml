@@ -1,0 +1,23 @@
+# Browser-only overlay. A private container tmpfs is cleared on stop/start.
+services:
+  db:
+    tmpfs: !reset []
+    volumes:
+      - auth-db:/var/lib/mysql
+    depends_on:
+      db-storage:
+        condition: service_started
+
+  db-storage:
+    image: mariadb:lts
+    entrypoint: ["sleep", "infinity"]
+    network_mode: none
+    volumes:
+      - auth-db:/storage:ro
+
+volumes:
+  auth-db:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs

@@ -1,0 +1,101 @@
+const express = require('express');
+
+function validate(params) {
+  const allowed = ['term', 'subject', 'query', 'status', 'sort', 'order', 'limit', 'offset'];
+  if (Object.entries(params).some(([key, value]) => !allowed.includes(key) || typeof value !== 'string')) return null;
+  const { term, status, sort = 'course', order = 'asc', limit = '50', offset = '0' } = params;
+  const { subject } = params;
+  let { query } = params;
+  if (typeof term !== 'string' || !/^\d{4}(10|50|90|95)$/.test(term) ||
+      (typeof subject !== 'string' || !/^[A-Z][A-Z0-9]{0,9}$/.test(subject)) ||
+      (status !== undefined && !['OPEN', 'CLOSED', 'CANCELLED'].includes(status)) ||
+      !['course', 'crn', 'availability'].includes(sort) || !['asc', 'desc'].includes(order) ||
+      !/^\d{1,3}$/.test(limit) || Number(limit) < 1 || Number(limit) > 100 ||
+      !/^\d{1,10}$/.test(offset) || Number(offset) > 2147483647) return null;
+  let prefix;
+  if (query !== undefined) {
+    if (query.length > 100) return null;
+    query = query.trim().replace(/\s+/g, ' ').toUpperCase();
+    const match = /^(?:([A-Z][A-Z0-9]{0,9}) )?(\d[A-Z0-9]{0,19})$/.exec(query);
+    if (!match || (match[1] && subject !== match[1])) return null;
+    prefix = match[2];
+  }
+  return { term, subject, prefix, status, sort, order, limit: Number(limit), offset: Number(offset) };
+}
+
+module.exports = function createCourses(pool, auth) {
+  let searchTerms = null;
+  if (process.env.SEARCH_TERMS !== undefined) {
+    try {
+      searchTerms = JSON.parse(process.env.SEARCH_TERMS);
+      if (!Array.isArray(searchTerms) || searchTerms.length > 2 ||
+          searchTerms.some(term => typeof term !== 'string' || !/^\d{4}(10|50|90|95)$/.test(term)) ||
+          new Set(searchTerms).size !== searchTerms.length) throw new Error();
+    } catch {
+      throw new Error('SEARCH_TERMS must be a JSON array of at most two distinct Banner term strings');
+    }
+  }
+  const router = express.Router();
+  router.use((req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    if (process.env.APP_ENV === 'production' && !req.secure) return res.status(400).json({ error: 'HTTPS required' });
+    next();
+  });
+  // Reuse the very same session initializer and user lookup as /api/auth.
+  router.use(auth.sessionMiddleware, auth.requireAuth);
+  router.get('/options', async (req, res) => {
+    if (Object.keys(req.query).length) return res.status(400).json({ error: 'Catalog options do not accept query parameters' });
+    const [rows] = await pool.execute(`SELECT DISTINCT s.term, c.subject
+      FROM Sections s INNER JOIN Courses c ON s.course_id = c.id
+      WHERE s.is_active = TRUE
+      ORDER BY s.term DESC, c.subject ASC`);
+    const terms = [];
+    for (const { term, subject } of rows) {
+      let entry = terms.at(-1);
+      if (entry?.code !== term) {
+        entry = { code: term, departments: [] };
+        terms.push(entry);
+      }
+      entry.departments.push(subject);
+    }
+    // Deployment configuration controls visibility; catalog rows only supply departments.
+    const configured = searchTerms?.map(code => ({ code,
+      departments: terms.find(term => term.code === code)?.departments ?? [] }));
+    res.json({ terms: configured ?? terms });
+  });
+  router.get('/', async (req, res) => {
+    const filters = validate(req.query);
+    if (!filters) return res.status(400).json({ error: 'Invalid course search parameters' });
+    const { term, subject, prefix, status, sort, order, limit, offset } = filters;
+    const conditions = ['s.term = ?', 's.is_active = TRUE'];
+    const values = [term];
+    for (const [condition, value] of [
+      ['c.subject = ?', subject], ['c.course_number LIKE ?', prefix === undefined ? undefined : `${prefix}%`],
+      ['s.status = ?', status],
+    ]) {
+      if (value !== undefined) { conditions.push(condition); values.push(value); }
+    }
+    const from = `FROM Sections s INNER JOIN Courses c ON s.course_id = c.id WHERE ${conditions.join(' AND ')}`;
+    // Signed subtraction also supports over-enrolled sections. Unknown availability sorts last.
+    const availability = '(CAST(s.capacity AS SIGNED) - CAST(s.enrolled AS SIGNED))';
+    const columns = {
+      course: ['c.subject', 'c.course_number', 's.section_number', 's.id'],
+      crn: ['s.crn', 's.id'],
+      availability: [availability, 'c.subject', 'c.course_number', 's.section_number', 's.id'],
+    };
+    const direction = order === 'asc' ? 'ASC' : 'DESC';
+    const ordering = (sort === 'availability' ? [`${availability} IS NULL ASC`] : [])
+      .concat(columns[sort].map(column => `${column} ${direction}`)).join(', ');
+    const [[count]] = await pool.execute(`SELECT COUNT(*) AS total ${from}`, values);
+    const [rows] = await pool.execute(`SELECT s.id, CONCAT(c.subject, ' ', c.course_number) AS course,
+      c.subject, c.course_number, c.title, s.term, s.crn, s.section_number AS section,
+      s.capacity AS max, s.enrolled AS now, s.status, s.is_active, UNIX_TIMESTAMP(s.last_checked_at) AS checked_epoch
+      ${from} ORDER BY ${ordering} LIMIT ? OFFSET ?`, [...values, limit, offset]);
+    const sections = rows.map(({ checked_epoch, ...row }) => ({ ...row,
+      is_active: Number(row.is_active) === 1,
+      last_checked_at: checked_epoch === null ? null : new Date(Number(checked_epoch) * 1000).toISOString(),
+    }));
+    res.json({ sections, pagination: { limit, offset, total: Number(count.total) } });
+  });
+  return router;
+};

@@ -1,0 +1,85 @@
+# Disposable test stack: loopback frontend only; no production volumes or .env.
+services:
+  db:
+    image: mariadb:lts
+    environment:
+      MARIADB_ROOT_PASSWORD: integration-only-password
+      MARIADB_DATABASE: njit_course_checker
+    tmpfs:
+      - /var/lib/mysql
+    volumes:
+      - ../../database/init/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    networks: [database]
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 1s
+      timeout: 5s
+      retries: 60
+
+  backend:
+    image: njit-banner-integration-backend
+    build: ../../backend
+    # Reuse the existing F2 tests/migration in this disposable stack only.
+    volumes:
+      - ../../backend/test:/app/test:ro
+      - ../../database:/database:ro
+    environment:
+      APP_ENV: development
+      APP_ORIGIN: http://127.0.0.1:${INTEGRATION_HTTP_PORT:?Set a disposable frontend port}
+      SESSION_SECRET: integration-only-session-secret-0123456789
+      CHECKER_API_TOKEN: integration-only-checker-token
+      DB_HOST: db
+      DB_NAME: njit_course_checker
+      DB_USER: root
+      DB_PASSWORD: integration-only-password
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [api, database]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 1s
+      timeout: 5s
+      retries: 60
+
+  frontend:
+    image: njit-banner-integration-frontend
+    build: ../../frontend
+    environment:
+      API_SCHEME: http
+    ports:
+      - "127.0.0.1:${INTEGRATION_HTTP_PORT}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [api, browser]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1/api/health]
+      interval: 1s
+      timeout: 5s
+      retries: 60
+
+  checker-test:
+    profiles: [tools]
+    image: njit-banner-integration-checker
+    build: ../..
+    working_dir: /workspace
+    command: [python, -B, tests/integration/checker_probe.py]
+    environment:
+      CHECKER_API_URL: http://backend:3000
+      CHECKER_API_TOKEN: integration-only-checker-token
+      PYTHONDONTWRITEBYTECODE: "1"
+      NO_PROXY: backend,localhost,127.0.0.1
+      APP_ORIGIN: http://127.0.0.1:${INTEGRATION_HTTP_PORT}
+    volumes:
+      - ../..:/workspace:ro
+    networks: [api]
+
+networks:
+  # Docker does not publish host ports for containers on internal networks only.
+  # Only Nginx joins this bridge; Express and MariaDB remain isolated.
+  browser: {}
+  api:
+    internal: true
+  database:
+    internal: true
