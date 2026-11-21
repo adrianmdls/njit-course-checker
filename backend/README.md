@@ -143,12 +143,17 @@ The defaults below apply in Compose unless marked otherwise.
 |---|---|
 | `DB_HOST`, `DB_PORT` | MariaDB address (`db:3306`). A standalone backend requires the host and defaults the port to `3306`. |
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Required database name, login, and password. |
+| `DB_TLS_CA_FILE` | Optional PEM CA file. Set to `/app/rds-ca.pem` in the backend image for `us-east-1` RDS and use the RDS endpoint DNS name as `DB_HOST`. Leave unset for local Compose. |
 | `PORT` | Express port, default `3000`. |
 | `APP_ENV` | Compose defaults to `development` for local HTTP. Use `production` for HTTPS. A standalone backend requires one of these values. |
 | `APP_ORIGIN` | Required exact browser origin without a trailing slash. Compose defaults to `http://localhost:8080`. Production requires an HTTPS origin. |
 | `SESSION_SECRET` | Required session signing secret of at least 32 bytes. Changing it invalidates existing cookies. |
 | `CHECKER_API_TOKEN` | Machine credential shared with the checker. An empty or unset token makes both internal routes return `503`. |
 | `SEARCH_TERMS` | Search dropdown terms. Compose sets it from `CHECKER_TERMS`, which requires one or two terms for the checker. |
+
+Setting `DB_TLS_CA_FILE` requires certificate- and hostname-verified TLS.
+Unreadable or invalid CA files fail at startup. Connection failures never
+retry over plaintext.
 
 For a standalone backend, leaving `SEARCH_TERMS` unset uses terms from active,
 linked catalog rows, newest first. Set it to `[]` to expose no terms, or give one
@@ -222,6 +227,13 @@ published database port.
     njit-backend-test sh -c 'node --test --test-concurrency=1 test/*.test.cjs'
 )
 ```
+
+To run the TLS integration cases, point `TEST_DB_HOST` and `TEST_DB_PORT` at a
+disposable MariaDB server with a TLS certificate matching that hostname. Set
+`TEST_DB_TLS_CA_FILE` to its CA and `TEST_DB_TLS_WRONG_HOST` to a second DNS
+name for the same server that the certificate does not cover. The fixture must
+accept plaintext so the tests can verify that failed TLS does not fall back.
+Run `node --test backend/test/db-tls.test.cjs` from the repository root.
 
 Never point these tests at an application database. They create and delete
 test schemas and rows and install a failure trigger. Run them serially because
