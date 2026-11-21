@@ -11,7 +11,7 @@ variable "vpc_cidr" {
 }
 
 variable "enable_runtime" {
-  description = "Enable cost-intensive application infrastructure."
+  description = "Enable cost-intensive application infrastructure. Setting this to false does not stop RDS."
   type        = bool
   default     = false
 }

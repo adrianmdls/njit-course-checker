@@ -73,6 +73,31 @@ output "private_db_subnet_ids" {
   value       = aws_subnet.private_db[*].id
 }
 
+output "rds_instance_identifier" {
+  description = "Identifier of the private RDS instance."
+  value       = aws_db_instance.database.identifier
+}
+
+output "rds_endpoint_hostname" {
+  description = "DNS hostname of the private RDS instance."
+  value       = aws_db_instance.database.address
+}
+
+output "rds_port" {
+  description = "Port of the private RDS instance."
+  value       = aws_db_instance.database.port
+}
+
+output "rds_database_name" {
+  description = "Name of the application database."
+  value       = aws_db_instance.database.db_name
+}
+
+output "rds_db_subnet_group_name" {
+  description = "Name of the private RDS DB subnet group."
+  value       = aws_db_subnet_group.database.name
+}
+
 output "availability_zones" {
   description = "Availability Zones used by the project subnets."
   value       = local.availability_zones
