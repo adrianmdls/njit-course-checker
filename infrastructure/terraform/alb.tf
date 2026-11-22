@@ -1,3 +1,7 @@
+locals {
+  frontend_http_origin = var.enable_runtime ? "http://${aws_lb.frontend[0].dns_name}" : null
+}
+
 resource "aws_lb" "frontend" {
   count = var.enable_runtime ? 1 : 0
 
@@ -7,6 +11,9 @@ resource "aws_lb" "frontend" {
   ip_address_type    = "ipv4"
   subnets            = aws_subnet.public[*].id
   security_groups    = [aws_security_group.alb.id]
+
+  xff_header_processing_mode = "append"
+  enable_xff_client_port     = false
 
   tags = {
     Name = "${var.project_name}-alb"

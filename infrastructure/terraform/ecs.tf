@@ -31,13 +31,22 @@ resource "aws_ecs_task_definition" "frontend" {
 
   container_definitions = jsonencode([{
     name      = "frontend"
-    image     = "${aws_ecr_repository.frontend.repository_url}:m1"
+    image     = "${aws_ecr_repository.frontend.repository_url}:${var.frontend_image_tag}"
     essential = true
     portMappings = [{
       containerPort = 80
       hostPort      = 80
       protocol      = "tcp"
     }]
+    environment = [
+      { name = "API_UPSTREAM", value = "backend.${local.backend_dns_namespace}:3000" },
+      { name = "API_RESOLVER", value = "169.254.169.253" },
+      { name = "API_SCHEME", value = "http" },
+      { name = "API_HOST", value = aws_lb.frontend[0].dns_name },
+      { name = "ALB_REAL_IP_DIRECTIVES", value = join("\n    ", [
+        for subnet in aws_subnet.public : "set_real_ip_from ${subnet.cidr_block};"
+      ]) },
+    ]
     logConfiguration = {
       logDriver = "awslogs"
       options = {

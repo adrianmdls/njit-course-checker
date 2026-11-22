@@ -20,7 +20,7 @@ output "alb_dns_name" {
 
 output "frontend_url" {
   description = "HTTP URL of the frontend through the ALB."
-  value       = var.enable_runtime ? "http://${aws_lb.frontend[0].dns_name}" : null
+  value       = local.frontend_http_origin
 }
 
 output "frontend_repository_url" {

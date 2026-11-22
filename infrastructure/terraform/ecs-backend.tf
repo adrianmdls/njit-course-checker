@@ -1,6 +1,36 @@
 locals {
-  backend_name    = "${var.project_name}-backend"
-  backend_enabled = var.enable_runtime && var.backend_image_tag != null
+  backend_name          = "${var.project_name}-backend"
+  backend_dns_namespace = "${var.project_name}.internal"
+  backend_enabled       = var.enable_runtime && var.backend_image_tag != null
+}
+
+resource "aws_service_discovery_private_dns_namespace" "backend" {
+  count = local.backend_enabled ? 1 : 0
+
+  name = local.backend_dns_namespace
+  vpc  = aws_vpc.main.id
+}
+
+resource "aws_service_discovery_service" "backend" {
+  count = local.backend_enabled ? 1 : 0
+
+  name = "backend"
+
+  dns_config {
+    namespace_id   = aws_service_discovery_private_dns_namespace.backend[0].id
+    routing_policy = "MULTIVALUE"
+
+    dns_records {
+      type = "A"
+      ttl  = 10
+    }
+  }
+
+  health_check_custom_config {
+    # ECS reports the container health. The AWS provider deprecates this
+    # argument, but keeping the API's fixed value avoids a replacement diff.
+    failure_threshold = 1
+  }
 }
 
 # Populate the secret value outside Terraform before starting the backend.
@@ -35,9 +65,9 @@ resource "aws_ecs_task_definition" "backend" {
       protocol      = "tcp"
     }]
     environment = [
-      # Express requires an HTTPS origin in production mode.
-      { name = "APP_ENV", value = try(startswith(var.backend_app_origin, "https://"), false) ? "production" : "development" },
-      { name = "APP_ORIGIN", value = var.backend_app_origin },
+      # Use the existing HTTP-compatible app mode for the temporary demo.
+      { name = "APP_ENV", value = "development" },
+      { name = "APP_ORIGIN", value = local.frontend_http_origin },
       { name = "PORT", value = "3000" },
       { name = "DB_HOST", value = aws_db_instance.database.address },
       { name = "DB_PORT", value = tostring(aws_db_instance.database.port) },
@@ -65,13 +95,6 @@ resource "aws_ecs_task_definition" "backend" {
       }
     }
   }])
-
-  lifecycle {
-    precondition {
-      condition     = var.backend_app_origin != null
-      error_message = "Set backend_app_origin when enabling the backend service."
-    }
-  }
 
   depends_on = [aws_iam_role_policy.backend_execution]
 
@@ -104,6 +127,10 @@ resource "aws_ecs_service" "backend" {
     subnets          = aws_subnet.private_app[*].id
     security_groups  = [aws_security_group.backend.id]
     assign_public_ip = false
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.backend[0].arn
   }
 
   depends_on = [

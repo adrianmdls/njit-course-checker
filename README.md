@@ -79,9 +79,8 @@ Keep the MariaDB volume and the checker's `data/` directory. See
 Earlier implementation notes cover [Banner ingestion](docs/phase-1-sync.md),
 [scheduling](docs/phase-2-sync.md), and [persistent watchlists](docs/phase-3-watchlists.md).
 
-The [Terraform files](infrastructure/terraform/) define the AWS network and
-supporting resources, plus an ECS frontend service using the `:m1` image. The
-[IT 342 diagram](docs/IT%20342%20Architecture%20Diagram.drawio) shows the broader
-planned deployment, including the backend, database, checker, and email delivery.
-See [AWS database initialization](docs/cloud_infrastructure/aws-db-initialization.md)
-for the one-off ECS task.
+Terraform defines the AWS network, private MariaDB instance, and ECS frontend
+and backend services. See the [Terraform configuration](infrastructure/terraform/)
+and [AWS database initialization and HTTP demo guide](docs/cloud_infrastructure/aws-db-initialization.md).
+The broader planned deployment includes the checker and email delivery. See the
+[IT 342 architecture diagram](docs/IT%20342%20Architecture%20Diagram.drawio).

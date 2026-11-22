@@ -6,7 +6,8 @@ Keep `enable_runtime=true` while it runs so ECR, Secrets Manager, and CloudWatch
 Logs are reachable over HTTPS through the existing NAT gateway. RDS traffic
 uses the private VPC route on TCP 3306.
 Enabling runtime also starts the existing ALB and frontend service, which
-requires its `:m1` image in ECR.
+uses the `:m1` image in ECR by default. Leave `backend_image_tag` unset for an
+initializer-only deployment.
 
 ## Prepare the image
 
@@ -85,6 +86,31 @@ matching retry preserves rows and passwords. Partial, unfamiliar, or drifted
 schemas require manual review.
 
 The dedicated execution role injects the master and app secrets by exact ARN,
-pulls from backend ECR, and writes to its own log streams. The future backend
-task needs access only to the app secret and must configure verified database
-TLS before using `njit_app`.
+pulls from backend ECR, and writes to its own log streams. The backend uses a
+separate execution role for the app database secret and the session signing
+secret.
+
+## IT 342 Milestone 2 HTTP demonstration
+
+After database initialization, set `frontend_image_tag` to a tag for the rebuilt
+Commit 4B frontend image and `backend_image_tag` to the published backend tag.
+Both images must be available in ECR for `linux/amd64`. Populate the backend
+session secret (`<project_name>/backend/session`) with at least 32 random bytes
+and keep it stable across task restarts. The backend uses the initialized schema,
+the app account from Secrets Manager, and certificate- and hostname-verified
+TLS to RDS. Course search also needs catalog data to show results.
+
+Open the `frontend_url` Terraform output in the browser. Terraform sets the
+backend's `APP_ORIGIN` to that exact `http://` origin using the generated ALB
+hostname. Remove the former `backend_app_origin` input from any local variable
+files or command-line flags. The ECS frontend uses the VPC resolver to look up
+`backend.njit-course-checker.internal` and refreshes its IPv4 answers on demand
+after 10 seconds. Replacing the single backend task can interrupt the API.
+If the last task deregisters before its replacement registers, Route 53 can
+cache the missing record under the hosted zone's separate negative-cache TTL.
+
+Use disposable demonstration credentials. HTTP leaves passwords and session
+cookies exposed in transit and is suitable only for the temporary demonstration.
+Public production deployments require HTTPS. The demo uses existing Express
+HTTP behavior with signed MariaDB sessions and `HttpOnly`, `SameSite=Lax`
+cookies. The cookie's `Secure` flag requires HTTPS.
