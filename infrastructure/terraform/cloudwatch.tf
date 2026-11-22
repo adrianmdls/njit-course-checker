@@ -19,3 +19,10 @@ resource "aws_cloudwatch_log_group" "backend" {
     Name = "${local.backend_name}-logs"
   }
 }
+
+resource "aws_cloudwatch_log_group" "checker" {
+  count = local.checker_enabled ? 1 : 0
+
+  name              = "/ecs/${local.checker_name}"
+  retention_in_days = 7
+}

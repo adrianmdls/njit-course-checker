@@ -62,3 +62,50 @@ resource "aws_lb_listener" "frontend_http" {
     Name = "${var.project_name}-http"
   }
 }
+
+resource "aws_lb_listener_rule" "block_ingestion" {
+  count = local.backend_enabled ? 1 : 0
+
+  listener_arn = aws_lb_listener.frontend_http[0].arn
+  priority     = 10
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      status_code  = "404"
+    }
+  }
+
+  condition {
+    path_pattern {
+      # The listener evaluates the normalized path. Express routes are case-insensitive.
+      regex_values = ["^/+[aA][pP][iI]/+[iI][nN][tT][eE][rR][nN][aA][lL]/+[sS][yY][nN][cC](/.*)?$"]
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "block_bearer" {
+  count = local.backend_enabled ? 1 : 0
+
+  listener_arn = aws_lb_listener.frontend_http[0].arn
+  priority     = 20
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      status_code  = "404"
+    }
+  }
+
+  # Browser auth uses cookies. Keep machine credentials private independently of URI parsing.
+  condition {
+    http_header {
+      http_header_name = "Authorization"
+      regex_values     = ["^[Bb][Ee][Aa][Rr][Ee][Rr] .+$"]
+    }
+  }
+}

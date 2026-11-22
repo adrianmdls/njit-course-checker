@@ -64,7 +64,7 @@ resource "aws_ecs_task_definition" "backend" {
       hostPort      = 3000
       protocol      = "tcp"
     }]
-    environment = [
+    environment = concat([
       # Use the existing HTTP-compatible app mode for the temporary demo.
       { name = "APP_ENV", value = "development" },
       { name = "APP_ORIGIN", value = local.frontend_http_origin },
@@ -73,12 +73,16 @@ resource "aws_ecs_task_definition" "backend" {
       { name = "DB_PORT", value = tostring(aws_db_instance.database.port) },
       { name = "DB_NAME", value = aws_db_instance.database.db_name },
       { name = "DB_TLS_CA_FILE", value = "/app/rds-ca.pem" },
-    ]
-    secrets = [
+      ], local.checker_enabled ? [
+      { name = "SEARCH_TERMS", value = jsonencode(var.checker_terms) },
+    ] : [])
+    secrets = concat([
       { name = "DB_USER", valueFrom = "${aws_secretsmanager_secret.database_app.arn}:username::" },
       { name = "DB_PASSWORD", valueFrom = "${aws_secretsmanager_secret.database_app.arn}:password::" },
       { name = "SESSION_SECRET", valueFrom = aws_secretsmanager_secret.backend_session.arn },
-    ]
+      ], local.checker_enabled ? [
+      { name = "CHECKER_API_TOKEN", valueFrom = aws_secretsmanager_secret.checker_token.arn },
+    ] : [])
     healthCheck = {
       command     = ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval    = 30
@@ -134,6 +138,8 @@ resource "aws_ecs_service" "backend" {
   }
 
   depends_on = [
+    aws_lb_listener_rule.block_ingestion,
+    aws_lb_listener_rule.block_bearer,
     aws_route_table_association.public,
     aws_route_table_association.private_app,
     aws_route_table_association.private_db,

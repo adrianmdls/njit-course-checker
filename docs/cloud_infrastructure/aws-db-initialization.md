@@ -114,3 +114,32 @@ cookies exposed in transit and is suitable only for the temporary demonstration.
 Public production deployments require HTTPS. The demo uses existing Express
 HTTP behavior with signed MariaDB sessions and `HttpOnly`, `SameSite=Lax`
 cookies. The cookie's `Secure` flag requires HTTPS.
+
+## Run the checker in ECS
+
+After the initializer succeeds, build the root `Dockerfile` for `linux/amd64`
+and publish it to the backend ECR repository under a distinct immutable tag.
+Populate `<project_name>/checker/ingestion-token` outside Terraform with a
+random 32-byte hex token before enabling the service. Store the hex string
+without a JSON wrapper or trailing newline. Both the backend and checker read
+that secret at startup. Redeploy both services after rotation.
+
+Start the backend with `checker_image_tag` unset. Before enabling the checker,
+verify that the public ALB returns `404` for mixed-case sync paths and for a
+request with a fixture bearer header. Keep the actual token on the private
+backend connection.
+
+Set `checker_image_tag` to the published tag and `checker_terms` to one or two
+Banner term strings. The checker starts when runtime and the backend are
+enabled. The same terms configure backend search. The checker sends its token
+only to the private backend hostname over HTTP in the demo VPC. The public ALB
+returns `404` for the internal sync paths and rejects bearer credentials, while
+browser authentication continues to use session cookies.
+
+Verify one running checker task and successful sync entries in
+`/ecs/<project_name>-checker`. With an empty watchlist, expect regular work
+on the half-hour schedule. The task's local `rotation.json` is ephemeral. ECS
+task replacement restarts the regular rotation at `ACCT` and repeated
+replacements can delay later departments. Keep one producer for this backend.
+Disabling runtime removes the checker service and log group. The ingestion
+token and images remain available for a later deployment.
