@@ -1,7 +1,9 @@
 # Operations
 
-Run commands from the repository root with the local environment configured as
-shown in the [README](../README.md#quick-start).
+Run the local Compose commands from the repository root with the environment
+configured as shown in the [README](../README.md#quick-start). For Fargate
+services and CloudWatch logs, see the
+[AWS deployment guide](cloud_infrastructure/aws-db-initialization.md).
 
 ## Running the stack
 
@@ -56,7 +58,7 @@ can run past the next tick. Missed ticks are skipped.
    For HTTP `401`, check that the checker and backend have the same token.
    A `503` can mean the token is unset on the backend or that MariaDB is
    unavailable. Check the backend health response and service logs. See the
-   [deployment checks](banner-smoke-test.md#deployment-network-and-tls).
+   [deployment checks](development/banner-smoke-test.md#deployment-network-and-tls).
 3. If a watched pair is missing from priority checks, confirm the watch was
    saved, the term is in `CHECKER_TERMS`, and the subject is in the department
    list. With no watched pairs, expect activity on the half-hour schedule only.
@@ -66,7 +68,7 @@ request fails or both terms were skipped. Use the log to confirm a successful
 sync. A submission timeout can leave the result uncertain if Express commits
 after the checker stops waiting. An accepted snapshot updates department
 completion, while a section's last-seen time changes only when it appears in
-the response. See [section activity](section-activity.md).
+the response. See [section activity](development/section-activity.md).
 
 ### Cursor and lock recovery
 

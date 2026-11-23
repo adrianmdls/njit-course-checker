@@ -4,7 +4,7 @@
 > and explicit monitoring targets were retired on November 19, 2026. Both
 > target endpoint forms now return watches. Phase 3 replaced the demo Add
 > and Remove controls with [persistent watchlists](phase-3-watchlists.md).
-> See [current operations](operations.md#scheduling-and-monitoring).
+> See [current operations](../operations.md#scheduling-and-monitoring).
 
 The checker now has two independent scheduling threads inside its existing
 process. There are no new services, dependencies, queues, database tables or
@@ -137,7 +137,7 @@ rewinding it. There is no automatic cursor reset or migration.
 
 ## Cursor recovery
 
-Follow the [current cursor and lock recovery steps](operations.md#cursor-and-lock-recovery).
+Follow the [current cursor and lock recovery steps](../operations.md#cursor-and-lock-recovery).
 
 An unreadable/invalid cursor or unknown next subject raises a dedicated state
 error. Before starting scheduling threads, the checker logs **Scheduler halted**

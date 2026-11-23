@@ -7,12 +7,12 @@ The Watchlist currently shows a disabled notification control.
 
 ## How it works
 
-The app runs in four Docker Compose services. The React frontend is served by
-Nginx, which forwards API calls to the Express backend. Express handles accounts,
-course search, and watchlists using MariaDB. The fourth service is the Python
-checker, which fetches department results from NJIT Banner, parses the sections,
-and posts a snapshot to Express with a separate API token. Express validates and
-saves each snapshot in a transaction.
+The local stack runs in four Docker Compose services. Nginx serves the React
+frontend and forwards API calls to Express, which handles accounts, course
+search, and watchlists using MariaDB. The Python checker fetches department
+results from NJIT Banner, parses the sections, and posts a snapshot to Express
+with a separate API token. Express validates and saves each snapshot in a
+transaction.
 
 ## Banner department synchronization
 
@@ -73,14 +73,15 @@ Keep the MariaDB volume and the checker's `data/` directory. See
 
 - [Backend](backend/README.md) covers the API, database, and configuration.
 - [Frontend](frontend/README.md) covers local React development.
-- The [Banner smoke-test guide](docs/banner-smoke-test.md) covers disposable integration
-  tests and deployment checks.
+- The [Banner smoke-test guide](docs/development/banner-smoke-test.md) covers
+  disposable integration tests and deployment checks.
 
-Earlier implementation notes cover [Banner ingestion](docs/phase-1-sync.md),
-[scheduling](docs/phase-2-sync.md), and [persistent watchlists](docs/phase-3-watchlists.md).
+Earlier implementation notes cover [Banner ingestion](docs/development/phase-1-sync.md),
+[scheduling](docs/development/phase-2-sync.md), and
+[persistent watchlists](docs/development/phase-3-watchlists.md).
 
-Terraform defines the AWS network, private MariaDB instance, and ECS frontend
-and backend services. See the [Terraform configuration](infrastructure/terraform/)
-and [AWS database initialization and HTTP demo guide](docs/cloud_infrastructure/aws-db-initialization.md).
-The broader planned deployment includes the checker and email delivery. See the
-[IT 342 architecture diagram](docs/IT%20342%20Architecture%20Diagram.drawio).
+Terraform defines the AWS network, private RDS MariaDB instance, and ECS Fargate
+services for the frontend, backend, and Python checker. The checker submits
+snapshots to the backend over the private VPC connection. See the
+[AWS deployment and HTTP demo guide](docs/cloud_infrastructure/aws-db-initialization.md)
+and [IT 342 architecture diagram](docs/cloud_infrastructure/IT%20342%20Architecture%20Diagram.drawio).

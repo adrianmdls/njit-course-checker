@@ -133,7 +133,7 @@ observations update and reactivate sections. Omitted rows keep their previous
 values and timestamps. An empty snapshot only records department completion.
 The response counts status changes on previously active sections. New or
 reactivated sections establish a baseline. The response fields are `courses`,
-`sections`, and `status_changes`. See [section activity](../docs/section-activity.md).
+`sections`, and `status_changes`. See [section activity](../docs/development/section-activity.md).
 
 ## Configuration
 
@@ -149,7 +149,7 @@ The defaults below apply in Compose unless marked otherwise.
 | `APP_ORIGIN` | Required exact browser origin without a trailing slash. Compose defaults to `http://localhost:8080`. Production requires an HTTPS origin. |
 | `SESSION_SECRET` | Required session signing secret of at least 32 bytes. Changing it invalidates existing cookies. |
 | `CHECKER_API_TOKEN` | Machine credential shared with the checker. An empty or unset token makes both internal routes return `503`. |
-| `SEARCH_TERMS` | Search dropdown terms. Compose sets it from `CHECKER_TERMS`, which requires one or two terms for the checker. |
+| `SEARCH_TERMS` | Search dropdown terms. Compose uses `CHECKER_TERMS`. ECS uses `checker_terms` when the checker service is enabled. |
 
 Setting `DB_TLS_CA_FILE` requires certificate- and hostname-verified TLS.
 Unreadable or invalid CA files fail at startup. Connection failures never
@@ -165,8 +165,9 @@ watches, and direct searches for historical terms remain available. See the
 [term code table](../docs/operations.md#banner-term-codes).
 
 `API_SCHEME` sets Nginx's forwarded protocol. Use `https` only behind real TLS
-termination. Compose's direct checker URL is for local HTTP. See the
-[deployment checks](../docs/banner-smoke-test.md#deployment-network-and-tls)
+termination. The [ECS demo](../docs/cloud_infrastructure/aws-db-initialization.md)
+and local Compose use HTTP for the direct checker connection. See the
+[deployment checks](../docs/development/banner-smoke-test.md#deployment-network-and-tls)
 for production.
 
 ## Database and migrations
@@ -184,10 +185,10 @@ only missing migrations to `njit_course_checker` before starting the backend.
   adds the `CANCELLED` section status.
 - [04-section-activity.sql](../database/migrations/04-section-activity.sql)
   adds `Sections.is_active`. Follow the
-  [activity migration instructions](../docs/section-activity.md#existing-volume-migration-manual-not-applied-by-this-change).
+  [activity migration instructions](../docs/development/section-activity.md#existing-volume-migration-manual-not-applied-by-this-change).
 - [05-remove-snapshot-generation.sql](../database/migrations/05-remove-snapshot-generation.sql)
   is an optional, forward-only cleanup for experimental columns. Follow the
-  [generation cleanup guide](../docs/snapshot-generation-cleanup.md#manual-migration-of-an-existing-volume).
+  [generation cleanup guide](../docs/development/snapshot-generation-cleanup.md#manual-migration-of-an-existing-volume).
 
 ## Tests
 
@@ -238,5 +239,5 @@ Run `node --test backend/test/db-tls.test.cjs` from the repository root.
 Never point these tests at an application database. They create and delete
 test schemas and rows and install a failure trigger. Run them serially because
 MariaDB advisory locks are shared across schemas. The
-[Banner smoke-test guide](../docs/banner-smoke-test.md#disposable-automated-verification)
+[Banner smoke-test guide](../docs/development/banner-smoke-test.md#disposable-automated-verification)
 covers the cross-service pipeline and optional Chrome tests.
