@@ -41,6 +41,19 @@ resource "aws_security_group" "database" {
   }
 }
 
+resource "aws_security_group" "checker" {
+  count = local.checker_enabled ? 1 : 0
+
+  name        = "${local.checker_name}-sg"
+  description = "Checker ECS tasks"
+  vpc_id      = aws_vpc.main.id
+
+  tags = {
+    Name = "${local.checker_name}-sg"
+    Tier = "checker"
+  }
+}
+
 resource "aws_vpc_security_group_ingress_rule" "alb_http" {
   security_group_id = aws_security_group.alb.id
   description       = "Public HTTP entry point"
@@ -166,5 +179,37 @@ resource "aws_vpc_security_group_egress_rule" "backend_https" {
   }
 }
 
+resource "aws_vpc_security_group_egress_rule" "checker_https" {
+  count = local.checker_enabled ? 1 : 0
+
+  security_group_id = aws_security_group.checker[0].id
+  description       = "HTTPS for Banner, ECR, Secrets Manager, and CloudWatch Logs"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_egress_rule" "checker_to_backend" {
+  count = local.checker_enabled ? 1 : 0
+
+  security_group_id            = aws_security_group.checker[0].id
+  description                  = "Private checker ingestion API"
+  ip_protocol                  = "tcp"
+  from_port                    = 3000
+  to_port                      = 3000
+  referenced_security_group_id = aws_security_group.backend.id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "backend_from_checker" {
+  count = local.checker_enabled ? 1 : 0
+
+  security_group_id            = aws_security_group.backend.id
+  description                  = "Ingestion requests from checker tasks"
+  ip_protocol                  = "tcp"
+  from_port                    = 3000
+  to_port                      = 3000
+  referenced_security_group_id = aws_security_group.checker[0].id
+}
+
 # Database has no outbound rules; replies to permitted connections are stateful.
-# Direct checker database access, if needed, requires a future explicit rule.

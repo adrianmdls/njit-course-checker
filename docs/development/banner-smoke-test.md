@@ -49,13 +49,13 @@ RUN_BROWSER_TESTS=1 python3 -B tests/integration/test_pipeline.py
 Chrome drives the built React app through Nginx. The populated and empty
 catalog tests cover department selection, search, pagination, watchlist
 add/remove and reload, error recovery, and session expiry. The authentication
-lifecycle in [auth_browser.mjs](../tests/integration/auth_browser.mjs) checks
+lifecycle in [auth_browser.mjs](../../tests/integration/auth_browser.mjs) checks
 registration, login, logout, session persistence across a backend restart,
 and recovery with the same session after MariaDB stops and starts. During the
 outage it checks for `503` from both `/api/auth/me` and `/api/health`. It also
 checks the login and registration rate limits on the disposable backend.
 
-The browser run adds [auth-compose.yaml](../tests/integration/auth-compose.yaml).
+The browser run adds [auth-compose.yaml](../../tests/integration/auth-compose.yaml).
 The override uses `!reset` to remove MariaDB's container-local tmpfs mount,
 which would lose its data on stop/start. A test-only tmpfs volume takes its
 place. A network-disabled helper keeps it mounted while MariaDB is stopped,
@@ -79,14 +79,15 @@ python3 -B -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 For standalone Node tests, use Node.js 24 or newer and install each package's
-locked dependencies. See [backend tests](../backend/README.md#tests) for
+locked dependencies. See [backend tests](../../backend/README.md#tests) for
 running against an isolated MariaDB instance and
-[frontend tests, lint, and build](../frontend/README.md#verification-and-build)
+[frontend tests, lint, and build](../../frontend/README.md#verification-and-build)
 for React development.
 
 ## Deployment network and TLS
 
-Use the fixture suite for regression tests. On a VM deployment, check DNS,
+Use the [AWS deployment guide](../cloud_infrastructure/aws-db-initialization.md)
+for the Fargate demo. On a VM deployment, check DNS,
 routing, firewalls, and TLS separately. The checker needs outbound access
 to NJIT Banner and the backend's HTTPS endpoint. Keep Express and MariaDB
 ports off the checker VM's network path.
@@ -108,5 +109,5 @@ container, then verify the certificate hostname and chain. Keep Requests
 certificate verification enabled. For a private CA, install its trust
 chain in the checker image or mount a CA bundle and set
 `REQUESTS_CA_BUNDLE` to the mounted file path. Run a single scheduled checker
-and use the [operations guide](operations.md#scheduling-and-monitoring) to
+and use the [operations guide](../operations.md#scheduling-and-monitoring) to
 check logs after a scheduled slot.

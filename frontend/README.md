@@ -47,7 +47,7 @@ npm run build
 
 The build produces `dist/`; the frontend Dockerfile serves it through Nginx.
 For deterministic search data and real browser/API checks, follow the
-[disposable smoke-test guide](../docs/banner-smoke-test.md).
+[disposable smoke-test guide](../docs/development/banner-smoke-test.md).
 
 The Department combobox filters by code or catalog name and requires an explicit
 option selection. Arrow keys navigate; Enter selects; Escape closes; Tab leaves

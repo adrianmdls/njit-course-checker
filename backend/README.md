@@ -133,7 +133,7 @@ observations update and reactivate sections. Omitted rows keep their previous
 values and timestamps. An empty snapshot only records department completion.
 The response counts status changes on previously active sections. New or
 reactivated sections establish a baseline. The response fields are `courses`,
-`sections`, and `status_changes`. See [section activity](../docs/section-activity.md).
+`sections`, and `status_changes`. See [section activity](../docs/development/section-activity.md).
 
 ## Configuration
 
@@ -143,12 +143,17 @@ The defaults below apply in Compose unless marked otherwise.
 |---|---|
 | `DB_HOST`, `DB_PORT` | MariaDB address (`db:3306`). A standalone backend requires the host and defaults the port to `3306`. |
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Required database name, login, and password. |
+| `DB_TLS_CA_FILE` | Optional PEM CA file. Set to `/app/rds-ca.pem` in the backend image for `us-east-1` RDS and use the RDS endpoint DNS name as `DB_HOST`. Leave unset for local Compose. |
 | `PORT` | Express port, default `3000`. |
 | `APP_ENV` | Compose defaults to `development` for local HTTP. Use `production` for HTTPS. A standalone backend requires one of these values. |
 | `APP_ORIGIN` | Required exact browser origin without a trailing slash. Compose defaults to `http://localhost:8080`. Production requires an HTTPS origin. |
 | `SESSION_SECRET` | Required session signing secret of at least 32 bytes. Changing it invalidates existing cookies. |
 | `CHECKER_API_TOKEN` | Machine credential shared with the checker. An empty or unset token makes both internal routes return `503`. |
-| `SEARCH_TERMS` | Search dropdown terms. Compose sets it from `CHECKER_TERMS`, which requires one or two terms for the checker. |
+| `SEARCH_TERMS` | Search dropdown terms. Compose uses `CHECKER_TERMS`. ECS uses `checker_terms` when the checker service is enabled. |
+
+Setting `DB_TLS_CA_FILE` requires certificate- and hostname-verified TLS.
+Unreadable or invalid CA files fail at startup. Connection failures never
+retry over plaintext.
 
 For a standalone backend, leaving `SEARCH_TERMS` unset uses terms from active,
 linked catalog rows, newest first. Set it to `[]` to expose no terms, or give one
@@ -160,8 +165,9 @@ watches, and direct searches for historical terms remain available. See the
 [term code table](../docs/operations.md#banner-term-codes).
 
 `API_SCHEME` sets Nginx's forwarded protocol. Use `https` only behind real TLS
-termination. Compose's direct checker URL is for local HTTP. See the
-[deployment checks](../docs/banner-smoke-test.md#deployment-network-and-tls)
+termination. The [ECS demo](../docs/cloud_infrastructure/aws-db-initialization.md)
+and local Compose use HTTP for the direct checker connection. See the
+[deployment checks](../docs/development/banner-smoke-test.md#deployment-network-and-tls)
 for production.
 
 ## Database and migrations
@@ -179,10 +185,10 @@ only missing migrations to `njit_course_checker` before starting the backend.
   adds the `CANCELLED` section status.
 - [04-section-activity.sql](../database/migrations/04-section-activity.sql)
   adds `Sections.is_active`. Follow the
-  [activity migration instructions](../docs/section-activity.md#existing-volume-migration-manual-not-applied-by-this-change).
+  [activity migration instructions](../docs/development/section-activity.md#existing-volume-migration-manual-not-applied-by-this-change).
 - [05-remove-snapshot-generation.sql](../database/migrations/05-remove-snapshot-generation.sql)
   is an optional, forward-only cleanup for experimental columns. Follow the
-  [generation cleanup guide](../docs/snapshot-generation-cleanup.md#manual-migration-of-an-existing-volume).
+  [generation cleanup guide](../docs/development/snapshot-generation-cleanup.md#manual-migration-of-an-existing-volume).
 
 ## Tests
 
@@ -223,8 +229,15 @@ published database port.
 )
 ```
 
+To run the TLS integration cases, point `TEST_DB_HOST` and `TEST_DB_PORT` at a
+disposable MariaDB server with a TLS certificate matching that hostname. Set
+`TEST_DB_TLS_CA_FILE` to its CA and `TEST_DB_TLS_WRONG_HOST` to a second DNS
+name for the same server that the certificate does not cover. The fixture must
+accept plaintext so the tests can verify that failed TLS does not fall back.
+Run `node --test backend/test/db-tls.test.cjs` from the repository root.
+
 Never point these tests at an application database. They create and delete
 test schemas and rows and install a failure trigger. Run them serially because
 MariaDB advisory locks are shared across schemas. The
-[Banner smoke-test guide](../docs/banner-smoke-test.md#disposable-automated-verification)
+[Banner smoke-test guide](../docs/development/banner-smoke-test.md#disposable-automated-verification)
 covers the cross-service pipeline and optional Chrome tests.

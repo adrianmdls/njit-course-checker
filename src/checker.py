@@ -22,13 +22,15 @@ logger = logging.getLogger(__name__)
 
 
 def setup_logging():
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    destination = {}
+    if os.environ.get("CHECKER_LOG_STDERR") != "1":
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        destination = {"filename": LOG_FILE, "encoding": "utf-8"}
     logging.basicConfig(
-        filename=LOG_FILE,
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        encoding="utf-8",
+        **destination,
     )
 
 

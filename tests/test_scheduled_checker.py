@@ -606,6 +606,21 @@ class ScheduledCheckerTests(unittest.TestCase):
                 self.assertEqual(checker.main(), 1)
         self.fetch.assert_not_called()
 
+    def test_logging_defaults_to_the_compose_file_and_can_use_stderr(self):
+        log_file = self.path.parent / 'data' / 'checker.log'
+        with patch.object(checker, 'LOG_FILE', log_file), \
+             patch.object(checker.logging, 'basicConfig') as configure:
+            with patch.dict(os.environ, {'CHECKER_LOG_STDERR': '1'}, clear=True):
+                checker.setup_logging()
+            self.assertNotIn('filename', configure.call_args.kwargs)
+            self.assertFalse(log_file.parent.exists())
+
+            with patch.dict(os.environ, {}, clear=True):
+                checker.setup_logging()
+            self.assertEqual(configure.call_args.kwargs['filename'], log_file)
+            self.assertEqual(configure.call_args.kwargs['encoding'], 'utf-8')
+            self.assertTrue(log_file.parent.is_dir())
+
     def test_term_and_pacing_configuration(self):
         for terms in ('[]', '{}', '["202710","202710"]', '[202710]', '["202711"]',
                       '["202710","202750","202790"]', 'not-json', '["２０２７１０"]'):

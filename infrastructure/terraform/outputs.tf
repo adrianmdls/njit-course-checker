@@ -1,26 +1,36 @@
 output "ecs_cluster_name" {
   description = "Name of the ECS cluster."
-  value       = var.enable_frontend ? aws_ecs_cluster.main[0].name : null
+  value       = aws_ecs_cluster.main[0].name
 }
 
 output "ecs_frontend_service_name" {
   description = "Name of the frontend ECS service."
-  value       = var.enable_frontend ? aws_ecs_service.frontend[0].name : null
+  value       = var.enable_runtime ? aws_ecs_service.frontend[0].name : null
+}
+
+output "ecs_backend_service_name" {
+  description = "Name of the ECS backend service when enabled."
+  value       = one(aws_ecs_service.backend[*].name)
 }
 
 output "alb_dns_name" {
   description = "DNS name of the internet-facing frontend ALB."
-  value       = var.enable_frontend ? aws_lb.frontend[0].dns_name : null
+  value       = var.enable_runtime ? aws_lb.frontend[0].dns_name : null
 }
 
 output "frontend_url" {
   description = "HTTP URL of the frontend through the ALB."
-  value       = var.enable_frontend ? "http://${aws_lb.frontend[0].dns_name}" : null
+  value       = local.frontend_http_origin
 }
 
 output "frontend_repository_url" {
   description = "URL of the private frontend ECR repository."
   value       = aws_ecr_repository.frontend.repository_url
+}
+
+output "backend_repository_url" {
+  description = "URL of the private ECR repository shared by the backend and database initializer."
+  value       = aws_ecr_repository.backend.repository_url
 }
 
 output "storage_bucket_name" {
@@ -71,6 +81,31 @@ output "private_app_subnet_ids" {
 output "private_db_subnet_ids" {
   description = "Private database subnet IDs in Availability Zone order."
   value       = aws_subnet.private_db[*].id
+}
+
+output "rds_instance_identifier" {
+  description = "Identifier of the private RDS instance."
+  value       = aws_db_instance.database.identifier
+}
+
+output "rds_endpoint_hostname" {
+  description = "DNS hostname of the private RDS instance."
+  value       = aws_db_instance.database.address
+}
+
+output "rds_port" {
+  description = "Port of the private RDS instance."
+  value       = aws_db_instance.database.port
+}
+
+output "rds_database_name" {
+  description = "Name of the application database."
+  value       = aws_db_instance.database.db_name
+}
+
+output "rds_db_subnet_group_name" {
+  description = "Name of the private RDS DB subnet group."
+  value       = aws_db_subnet_group.database.name
 }
 
 output "availability_zones" {

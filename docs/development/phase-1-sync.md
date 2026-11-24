@@ -4,7 +4,7 @@
 > standalone department-sync helper were retired in the repository cleanup.
 > Current ingestion accepts different titles on distinct CRNs and rejects
 > conflicting duplicate CRNs with `crn` / `conflicting_crn`. See the
-> [current ingestion contract](../backend/README.md#internal-department-synchronization).
+> [current ingestion contract](../../backend/README.md#internal-department-synchronization).
 
 Implemented on `feature/scheduled-course-sync`, based on `multi-container`.
 `feature/persistent-watchlists` is preserved separately. No experimental refresh
