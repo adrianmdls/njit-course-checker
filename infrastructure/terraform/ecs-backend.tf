@@ -25,12 +25,6 @@ resource "aws_service_discovery_service" "backend" {
       ttl  = 10
     }
   }
-
-  health_check_custom_config {
-    # ECS reports the container health. The AWS provider deprecates this
-    # argument, but keeping the API's fixed value avoids a replacement diff.
-    failure_threshold = 1
-  }
 }
 
 # Populate the secret value outside Terraform before starting the backend.

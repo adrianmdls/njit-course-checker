@@ -15,6 +15,7 @@ resource "aws_db_instance" "database" {
   # The RDS MariaDB 11.8 defaults enforce TLS via require_secure_transport.
   parameter_group_name = "default.mariadb11.8"
   instance_class       = "db.t4g.micro"
+  availability_zone = "us-east-1a"
   multi_az             = false
   allocated_storage    = 20
   storage_type         = "gp3"

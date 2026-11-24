@@ -105,7 +105,7 @@ resource "aws_lb_listener_rule" "block_bearer" {
   condition {
     http_header {
       http_header_name = "Authorization"
-      regex_values     = ["^[Bb][Ee][Aa][Rr][Ee][Rr] .+$"]
+      values           = ["Bearer *"]
     }
   }
 }
