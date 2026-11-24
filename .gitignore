@@ -39,6 +39,7 @@ backups/
 **/.terraform/
 *.tfstate
 *.tfstate.*
+*.tfplan
 *.tfvars
 *.tfvars.json
 crash.log
@@ -50,6 +51,9 @@ override.tf.json
 .terraformrc
 terraform.rc
 !**/.terraform.lock.hcl
+# Approved non-sensitive configurations
+!/infrastructure/terraform/runtime.tfvars
+!/infrastructure/terraform/idle.tfvars
 
 # Draw.io files
 *.drawio.bkp
