@@ -83,5 +83,6 @@ Earlier implementation notes cover [Banner ingestion](docs/development/phase-1-s
 Terraform defines the AWS network, private RDS MariaDB instance, and ECS Fargate
 services for the frontend, backend, and Python checker. The checker submits
 snapshots to the backend over the private VPC connection. See the
-[AWS deployment and HTTP demo guide](docs/cloud_infrastructure/aws-db-initialization.md)
+[Terraform runtime guide](infrastructure/terraform/README.md),
+[AWS deployment and HTTP demo guide](docs/cloud_infrastructure/aws-db-initialization.md),
 and [IT 342 architecture diagram](docs/cloud_infrastructure/IT%20342%20Architecture%20Diagram.drawio).
